@@ -1,36 +1,36 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
-
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 
 /**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+    console.log('Your extension "obsidian-tooltips" is now active!');
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "obsidian-tooltips" is now active!');
+    // Register a hover provider for all file types
+    const hoverProvider = vscode.languages.registerHoverProvider('*', {
+        provideHover(document, position) {
+            // Get the word at the current cursor position
+            const range = document.getWordRangeAtPosition(position);
+            if (!range) {
+                return;
+            }
+            const word = document.getText(range);
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with  registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('obsidian-tooltips.helloWorld', function () {
-		// The code you place here will be executed every time your command is executed
+            // Check if the word is "Hello"
+            if (word === 'Hello') {
+                // Return a hover object with the tooltip text
+                return new vscode.Hover('This is a tooltip for the word "Hello"!');
+            }
+        }
+    });
 
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from Obsidian Tooltips in VS Code!');
-	});
-
-	context.subscriptions.push(disposable);
+    // Add the hover provider to the subscriptions
+    context.subscriptions.push(hoverProvider);
 }
 
-// This method is called when your extension is deactivated
 function deactivate() {}
 
 module.exports = {
-	activate,
-	deactivate
-}
+    activate,
+    deactivate
+};
