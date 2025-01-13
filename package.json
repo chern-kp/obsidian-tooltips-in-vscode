@@ -18,7 +18,11 @@
             {
                 "command": "obsidian-tooltips.helloWorld",
                 "title": "Hello World"
-            }
+            },
+            {
+                "command": "obsidian-tooltips.connectWithObsidian",
+                "title": "Obsidian Tooltips: Connect With Obsidian"
+              }
         ],
         "languages": [
             {
