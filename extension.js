@@ -99,7 +99,20 @@ function activate(context) {
     // Command registration
     let connectCommand = vscode.commands.registerCommand('obsidian-tooltips.connectWithObsidian', async () => {
         try {
+            // Check current connection status
+            const connectedVault = context.globalState.get('connectedVault');
+
+            if (connectedVault) {
+                // Disconnect logic
+                await context.globalState.update('connectedVault', undefined);
+                vscode.window.showInformationMessage(`Disconnected from vault: ${connectedVault}`);
+                log(`Vault disconnected: ${connectedVault}`);
+                return;
+            }
+
             log('Connect With Obsidian command triggered');
+
+            // Obsidian detection logic
             const obsidianPath = await findObsidian();
 
             if (obsidianPath) {
@@ -108,55 +121,54 @@ function activate(context) {
 
                 const vaults = await getObsidianVaults();
                 if (vaults.length === 0) {
-                    vscode.window.showInformationMessage('No Obsidian vaults found! ');
+                    vscode.window.showInformationMessage('No Obsidian vaults found!');
                     return;
                 }
 
                 const selectedVault = await vscode.window.showQuickPick(
                     vaults.map(path => ({
-                        label: path.split(/[\\/]/).pop(),
-                        description: path,
-                        detail: path
+                        label: path.split(/[\\/]/).pop(), // Display vault name
+                        description: path, // Full path as description
+                        detail: path // Full path again
                     })),
                     {
-                        placeHolder: 'Select a vault to open',
+                        placeHolder: 'Select a vault to connect',
                         ignoreFocusOut: true
                     }
                 );
 
                 if (selectedVault) {
-                    outputChannel.appendLine(`Selected vault: ${selectedVault.description}`);
-                    // TODO
+                    await context.globalState.update('connectedVault', selectedVault.description);
+                    vscode.window.showInformationMessage(`Connected to vault: ${selectedVault.description}`);
+                    log(`Vault connected: ${selectedVault.description}`);
                 }
-
             } else {
-                // If Obsidian is not found, open a file picker dialog
+                // Manual path selection
                 log('Opening file picker dialog');
                 const result = await vscode.window.showOpenDialog({
                     canSelectFiles: true,
                     canSelectFolders: false,
                     canSelectMany: false,
-                    title: 'Open Obsidian execution file',
-                    filters: {
-                        'Executable': ['exe', 'app', '']
-                    },
-                    // Open in AppData\Local, if on Windows
+                    title: 'Locate Obsidian Executable',
+                    filters: {'Executable': ['exe', 'app', '']},
                     defaultUri: os.platform() === 'win32'
                         ? vscode.Uri.file(path.join(process.env.LOCALAPPDATA, 'Obsidian'))
                         : undefined
                 });
 
-                if (result && result[0]) {
+                if (result?.[0]?.fsPath) {
                     await context.globalState.update('obsidianPath', result[0].fsPath);
                     log(`Obsidian path manually set: ${result[0].fsPath}`);
+                    vscode.window.showInformationMessage('Select a vault to connect');
                 } else {
                     log('File picker cancelled by user');
                 }
             }
         } catch (error) {
-            log(`Error occurred: ${error.message}`);
+            const errorMessage = `Connection error: ${error.message}`;
+            log(errorMessage);
             log(`Stack trace: ${error.stack}`);
-            vscode.window.showErrorMessage(`Error: ${error.message}`);
+            vscode.window.showErrorMessage(errorMessage);
         }
     });
 
