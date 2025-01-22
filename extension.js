@@ -22,9 +22,7 @@ function log(message) {
     outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
 }
 
-/**
- * Find the path to the Obsidian program
- */
+// Find the path to the Obsidian program
 async function findObsidian() {
     const platform = os.platform();
     let obsidianPath = null;
@@ -56,6 +54,40 @@ async function findObsidian() {
     }
 }
 
+
+
+function getObsidianConfigPath() {
+    const platform = os.platform();
+    let configPath;
+
+    if (platform === 'win32') {
+        configPath = path.join(process.env.APPDATA, 'Obsidian', 'obsidian.json');
+    } else if (platform === 'darwin') {
+        configPath = path.join(os.homedir(), 'Library/Application Support/Obsidian/obsidian.json');
+    } else {
+        configPath = path.join(os.homedir(), '.config/Obsidian/obsidian.json');
+    }
+
+    log(`Calculated config path: ${configPath}`);
+    return configPath;
+}
+
+async function getObsidianVaults() {
+    try {
+        const configPath = getObsidianConfigPath();
+        await fs.promises.access(configPath, fs.constants.R_OK);
+        const configRaw = await fs.promises.readFile(configPath, 'utf-8');
+        const config = JSON.parse(configRaw);
+
+        return config.vaults
+            ? Object.values(config.vaults).map(v => v.path)
+            : [];
+    } catch (error) {
+        log(`Failed to read Obsidian config: ${error.message}`);
+        return [];
+    }
+}
+
 /**
  * @param {vscode.ExtensionContext} context
  */
@@ -73,6 +105,30 @@ function activate(context) {
             if (obsidianPath) {
                 await context.globalState.update('obsidianPath', obsidianPath);
                 log(`Obsidian path saved: ${obsidianPath}`);
+
+                const vaults = await getObsidianVaults();
+                if (vaults.length === 0) {
+                    vscode.window.showInformationMessage('No Obsidian vaults found! ');
+                    return;
+                }
+
+                const selectedVault = await vscode.window.showQuickPick(
+                    vaults.map(path => ({
+                        label: path.split(/[\\/]/).pop(),
+                        description: path,
+                        detail: path
+                    })),
+                    {
+                        placeHolder: 'Select a vault to open',
+                        ignoreFocusOut: true
+                    }
+                );
+
+                if (selectedVault) {
+                    outputChannel.appendLine(`Selected vault: ${selectedVault.description}`);
+                    // TODO
+                }
+
             } else {
                 // If Obsidian is not found, open a file picker dialog
                 log('Opening file picker dialog');
