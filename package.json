@@ -26,6 +26,10 @@
             {
                 "command": "obsidian-tooltips.updateNotesInformation",
                 "title": "Obsidian Tooltips: Update List of Notes"
+            },
+            {
+                "command": "obsidian-tooltips.openObsidianUri",
+                "title": "Open in Obsidian"
             }
         ],
         "languages": [
@@ -35,7 +39,28 @@
                 "extensions": [".txt"],
                 "configuration": "./language-configuration.json"
             }
-        ]
+        ],
+        "configuration": {
+            "title": "Obsidian Tooltips",
+            "properties": {
+                "obsidian-tooltips.enableExternalLinks": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable opening Obsidian links from tooltips"
+                },
+                "obsidian-tooltips.connectedVault": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to connected Obsidian vault"
+                }
+            }
+        }
+    },
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": true,
+            "description": "This extension can open external Obsidian links"
+        }
     },
     "scripts": {
         "lint": "eslint .",
@@ -49,5 +74,10 @@
         "eslint": "^9.16.0",
         "@vscode/test-cli": "^0.0.10",
         "@vscode/test-electron": "^2.4.1"
+    },
+    "extensionKind": ["workspace"],
+    "enableApiProposed": true,
+    "dependencies": {
+        "vscode-uri": "^3.0.8"
     }
 }
