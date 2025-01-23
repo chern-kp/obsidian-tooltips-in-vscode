@@ -169,12 +169,12 @@ async function updateNotesInformation(vaultPath, force = false) {
         const notes = await loadVaultNotes(vaultPath);
 
         // Clear and update cache
-        notesCache.clear();
         notes.forEach((note) => {
             const relativePath = path.relative(vaultPath, note.path);
             notesCache.set(relativePath, {
                 fullPath: note.path,
                 aliases: note.aliases,
+                uri: note.uri
             });
         });
 
@@ -254,22 +254,25 @@ async function loadVaultNotes(vaultPath) {
 
                 if (entry.isDirectory()) {
                     await scanDirectory(fullPath);
-                } else if (
-                    entry.isFile() &&
-                    path.extname(entry.name) === ".md"
-                ) {
+                } else if (entry.isFile() && path.extname(entry.name) === ".md") {
                     const aliases = await extractAliases(fullPath);
+                    // Generate relative path and Obsidian URI during initial scan
+                    const relativePath = path.relative(vaultPath, fullPath);
+                    const obsidianUri = createObsidianUri(vaultPath, relativePath);
+
                     const noteInfo = {
                         path: fullPath,
+                        relativePath: relativePath,
                         aliases: aliases,
+                        uri: obsidianUri
                     };
                     notes.push(noteInfo);
 
-                    // Log note info
                     log(`Found note: ${fullPath}`);
                     if (aliases.length > 0) {
                         log(`  Aliases: ${aliases.join(", ")}`);
                     }
+                    log(`  URI: ${obsidianUri}`);
                 }
             }
         }
@@ -296,6 +299,7 @@ function findNoteMatch(word) {
                 path: relativePath,
                 fullPath: noteInfo.fullPath,
                 type: "title",
+                uri: noteInfo.uri
             };
         }
 
@@ -309,6 +313,7 @@ function findNoteMatch(word) {
                 fullPath: noteInfo.fullPath,
                 type: "alias",
                 matchedAlias: aliasMatch,
+                uri: noteInfo.uri
             };
         }
     }
@@ -509,18 +514,12 @@ function activate(context) {
             const word = document.getText(range);
             const match = findNoteMatch(word);
 
-            if (match) {
-                const message = new vscode.MarkdownString("", true);
-                message.isTrusted = true;
-                message.supportHtml = true;
+                if (match && match.uri) {
+                    const message = new vscode.MarkdownString("", true);
+                    message.isTrusted = true;
+                    message.supportHtml = true;
 
-                const obsidianUri = createObsidianUri(
-                    connectedVault,
-                    match.path
-                );
-
-                if (obsidianUri) {
-                    // Create content with direct URI link
+                    // Create content with cached URI
                     if (match.type === "title") {
                         message.appendMarkdown(
                             `**Note found**\n\nPath: \`${match.path}\`\n\n`
@@ -533,10 +532,9 @@ function activate(context) {
 
                     message.appendMarkdown(
                         `[Open in Obsidian](command:obsidian-tooltips.openObsidianUri?${encodeURIComponent(
-                            JSON.stringify([obsidianUri])
+                            JSON.stringify([match.uri])
                         )})`
                     );
-                }
 
                 return new vscode.Hover(message);
             }
