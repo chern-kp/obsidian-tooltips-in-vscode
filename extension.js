@@ -6,6 +6,10 @@ const os = require('os');
 // Create global output channel for logging
 let outputChannel;
 
+// Create cache for notes information (Tiles and Aliases)
+let notesCache = new Map();
+let lastUpdateTime = 0;
+
 /**
  * Initialize logging system
  */
@@ -54,8 +58,6 @@ async function findObsidian() {
     }
 }
 
-
-
 function getObsidianConfigPath() {
     const platform = os.platform();
     let configPath;
@@ -88,23 +90,188 @@ async function getObsidianVaults() {
     }
 }
 
+// Check if vault directory has been modified since last update
+async function needsUpdate(vaultPath) {
+    try {
+        let latestModification = 0;
+
+        // Recursive function to check modification times
+        async function checkDirectory(dirPath) {
+            const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+            for (const entry of entries) {
+                const fullPath = path.join(dirPath, entry.name);
+
+                // Skip hidden files and directories
+                if (entry.name.startsWith('.')) {
+                    continue;
+                }
+
+                if (entry.isDirectory()) {
+                    await checkDirectory(fullPath);
+                } else if (entry.isFile() && path.extname(entry.name) === '.md') {
+                    const stats = await fs.promises.stat(fullPath);
+                    latestModification = Math.max(latestModification, stats.mtimeMs);
+                }
+            }
+        }
+
+        await checkDirectory(vaultPath);
+
+        // Check if we need to update
+        const needsRefresh = latestModification > lastUpdateTime;
+        log(`Vault modification check: Last update: ${new Date(lastUpdateTime).toLocaleString()}, Latest modification: ${new Date(latestModification).toLocaleString()}`);
+        log(`Update needed: ${needsRefresh}`);
+
+        return needsRefresh;
+    } catch (error) {
+        log(`Error checking vault modifications: ${error.message}`);
+        // If error occurs, force update to be safe
+        return true;
+    }
+}
+
+// Update notes information for connected vault
+async function updateNotesInformation(vaultPath, force = false) {
+    try {
+        log('Checking if notes information update is needed');
+
+        // Skip update if vault hasn't been modified
+        if (!force && !await needsUpdate(vaultPath)) {
+            const message = 'Vault is up to date, skipping scan';
+            log(message);
+            vscode.window.showInformationMessage(message);
+            return;
+        }
+
+        log('Starting notes information update');
+        const notes = await loadVaultNotes(vaultPath);
+
+        // Clear and update cache
+        notesCache.clear();
+        notes.forEach(note => {
+            const relativePath = path.relative(vaultPath, note.path);
+            notesCache.set(relativePath, {
+                fullPath: note.path,
+                aliases: note.aliases
+            });
+        });
+
+        // Update last update timestamp
+        lastUpdateTime = Date.now();
+
+        // Log results
+        outputChannel.appendLine(`\nUpdated information for ${notes.length} notes:`);
+        notesCache.forEach((noteInfo, relativePath) => {
+            outputChannel.appendLine(`→ ${relativePath}`);
+            if (noteInfo.aliases.length > 0) {
+                outputChannel.appendLine(`  Aliases: ${noteInfo.aliases.join(', ')}`);
+            }
+        });
+
+        vscode.window.showInformationMessage(`Updated information for ${notes.length} notes`);
+        log('Notes information update completed');
+    } catch (error) {
+        const errorMessage = `Failed to update notes information: ${error.message}`;
+        log(errorMessage);
+        vscode.window.showErrorMessage(errorMessage);
+        throw error;
+    }
+}
+
+//Recursively scans vault directory for markdown files and extracts aliases
+async function loadVaultNotes(vaultPath) {
+    try {
+        log(`Starting vault scan: ${vaultPath}`);
+        const notes = [];
+
+        // Function to extract aliases from file content
+        async function extractAliases(filePath) {
+            const content = await fs.promises.readFile(filePath, 'utf-8');
+
+            // Check if file starts with frontmatter
+            if (!content.startsWith('---')) {
+                return [];
+            }
+
+            // Find the end of frontmatter
+            const secondDash = content.indexOf('---', 3);
+            if (secondDash === -1) {
+                return [];
+            }
+
+            // Extract frontmatter content
+            const frontmatter = content.substring(3, secondDash);
+
+            // Look for aliases section
+            const aliasesMatch = frontmatter.match(/aliases:\n((?:  - .*\n)*)/);
+            if (!aliasesMatch) {
+                return [];
+            }
+
+            // Extract individual aliases
+            const aliasesSection = aliasesMatch[1];
+            return aliasesSection
+                .split('\n')
+                .filter(line => line.startsWith('  - '))
+                .map(line => line.substring(4).trim());
+        }
+
+        async function scanDirectory(dirPath) {
+            const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+            for (const entry of entries) {
+                const fullPath = path.join(dirPath, entry.name);
+
+                if (entry.isDirectory()) {
+                    await scanDirectory(fullPath);
+                } else if (entry.isFile() && path.extname(entry.name) === '.md') {
+                    const aliases = await extractAliases(fullPath);
+                    const noteInfo = {
+                        path: fullPath,
+                        aliases: aliases
+                    };
+                    notes.push(noteInfo);
+
+                    // Log note info
+                    log(`Found note: ${fullPath}`);
+                    if (aliases.length > 0) {
+                        log(`  Aliases: ${aliases.join(', ')}`);
+                    }
+                }
+            }
+        }
+
+        await scanDirectory(vaultPath);
+        log(`Total notes found: ${notes.length}`);
+        return notes;
+    } catch (error) {
+        log(`Vault scan failed: ${error.message}`);
+        throw error;
+    }
+}
+
 /**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
-    // Initialize logging system
+    // Initialize logging and cache systems
     initializeLogging();
+    notesCache.clear();
+    lastUpdateTime = 0;
     log('Extension activated!');
 
-    // Command registration
+    // Command registration for connect
     let connectCommand = vscode.commands.registerCommand('obsidian-tooltips.connectWithObsidian', async () => {
         try {
             // Check current connection status
             const connectedVault = context.globalState.get('connectedVault');
 
             if (connectedVault) {
-                // Disconnect logic
+                // Clear all cache data and reset timestamp on disconnect
                 await context.globalState.update('connectedVault', undefined);
+                notesCache.clear();
+                lastUpdateTime = 0;
                 vscode.window.showInformationMessage(`Disconnected from vault: ${connectedVault}`);
                 log(`Vault disconnected: ${connectedVault}`);
                 return;
@@ -127,9 +294,9 @@ function activate(context) {
 
                 const selectedVault = await vscode.window.showQuickPick(
                     vaults.map(path => ({
-                        label: path.split(/[\\/]/).pop(), // Display vault name
-                        description: path, // Full path as description
-                        detail: path // Full path again
+                        label: path.split(/[\\/]/).pop(),
+                        description: path,
+                        detail: path
                     })),
                     {
                         placeHolder: 'Select a vault to connect',
@@ -139,11 +306,16 @@ function activate(context) {
 
                 if (selectedVault) {
                     await context.globalState.update('connectedVault', selectedVault.description);
+                    try {
+                        // Initial vault scan on connection
+                        await updateNotesInformation(selectedVault.description, true);
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Failed to scan vault: ${error.message}`);
+                    }
                     vscode.window.showInformationMessage(`Connected to vault: ${selectedVault.description}`);
                     log(`Vault connected: ${selectedVault.description}`);
                 }
             } else {
-                // Manual path selection
                 log('Opening file picker dialog');
                 const result = await vscode.window.showOpenDialog({
                     canSelectFiles: true,
@@ -172,17 +344,32 @@ function activate(context) {
         }
     });
 
+    // Register command for updating notes information
+    let updateCommand = vscode.commands.registerCommand('obsidian-tooltips.updateNotesInformation', async () => {
+        const connectedVault = context.globalState.get('connectedVault');
+        if (!connectedVault) {
+            vscode.window.showWarningMessage('Please connect to an Obsidian vault first');
+            return;
+        }
+
+        try {
+            // Update if vault was changed
+            await updateNotesInformation(connectedVault, false);
+        } catch (error) {
+            log(`Failed to update notes information: ${error.message}`);
+            vscode.window.showErrorMessage(`Failed to update notes: ${error.message}`);
+        }
+    });
+
     // Hover provider registration
     const hoverProvider = vscode.languages.registerHoverProvider('*', {
         provideHover(document, position) {
-            // Get the word at the current cursor position
             const range = document.getWordRangeAtPosition(position);
             if (!range) {
                 return;
             }
             const word = document.getText(range);
 
-            // Check if the word is "Hello"
             if (word === 'Hello') {
                 log(`Hover triggered for word: ${word}`);
                 return new vscode.Hover('This is a tooltip for the word "Hello"!');
@@ -190,8 +377,8 @@ function activate(context) {
         }
     });
 
-    // Add to subscriptions
-    context.subscriptions.push(connectCommand, hoverProvider);
+    // ! Add new update command to subscriptions
+    context.subscriptions.push(connectCommand, updateCommand, hoverProvider);
     log('Extension fully initialized');
 }
 

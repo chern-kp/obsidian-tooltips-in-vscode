@@ -22,6 +22,10 @@
             {
                 "command": "obsidian-tooltips.connectWithObsidian",
                 "title": "Obsidian Tooltips: Connect With Obsidian"
+            },
+            {
+                "command": "obsidian-tooltips.updateNotesInformation",
+                "title": "Obsidian Tooltips: Update List of Notes"
             }
         ],
         "languages": [
