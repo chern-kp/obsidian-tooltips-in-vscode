@@ -29,7 +29,7 @@ function activate(context) {
 
         try {
             log(`Connected vault found: ${connectedVault}`);
-            const needsRefresh = await needsUpdate(connectedVault);
+            const needsRefresh = await isVaultModified(connectedVault);
             if (needsRefresh) {
                 log("Vault has been modified. Updating notes information...");
                 await updateNotesInformation(connectedVault, true);
@@ -349,7 +349,7 @@ async function getObsidianVaults() {
 }
 
 //FUNC - Check if vault directory has been modified since last update
-async function needsUpdate(vaultPath) {
+async function isVaultModified(vaultPath) {
     try {
         let latestModification = 0;
 
@@ -383,7 +383,7 @@ async function updateNotesInformation(vaultPath, force = false) {
         log("Checking if notes information update is needed");
 
         // Skip update if vault hasn't been modified
-        if (!force && !(await needsUpdate(vaultPath))) {
+        if (!force && !(await isVaultModified(vaultPath))) {
             const message = "Vault is up to date, skipping scan";
             log(message);
             vscode.window.showInformationMessage(message);
