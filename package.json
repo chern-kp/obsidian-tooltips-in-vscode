@@ -28,8 +28,8 @@
                 "title": "Obsidian Tooltips: Update List of Notes"
             },
             {
-                "command": "obsidian-tooltips.openObsidianUri",
-                "title": "Open in Obsidian"
+                "command": "obsidian-tooltips.pickDirectories",
+                "title": "Obsidian Tooltips: Pick Directories"
             }
         ],
         "languages": [

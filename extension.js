@@ -3,16 +3,22 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-// Create global output channel for logging
+// Global output channel for logging
 let outputChannel;
 
-// Create cache for notes information (Tiles and Aliases)
+// Cache for notes information (Tiles and Aliases)
 let notesCache = new Map();
 let lastUpdateTime = 0;
-
+// List of directories to scan for notes that are selected by the user
+let selectedDirectories = new Set(['Notes In Root']);
+// Context (state) of the extension as global variable
+let vscodeContext;
 
 //FUNC - Activate the extension (Entry point)
 function activate(context) {
+
+    vscodeContext = context; // Save context globally
+
     // Initialize logging and cache systems
     initializeLogging();
     notesCache.clear();
@@ -108,6 +114,10 @@ function activate(context) {
                                 selectedVault.description,
                                 true
                             );
+
+                            // Let user pick directories on connection
+                            await pickDirectories(selectedVault.description);
+
                         } catch (error) {
                             vscode.window.showErrorMessage(
                                 `Failed to scan vault: ${error.message}`
@@ -202,6 +212,19 @@ function activate(context) {
         }
     );
 
+    // ANCHOR - Command registration for "Pick Directories" command
+    let pickDirectoriesCommand = vscode.commands.registerCommand(
+        'obsidian-tooltips.pickDirectories',
+        async () => {
+            const connectedVault = vscodeContext.globalState.get('connectedVault');
+            if (!connectedVault) {
+                vscode.window.showWarningMessage('Please connect to an Obsidian vault first');
+                return;
+            }
+            await pickDirectories(connectedVault);
+        }
+    );
+
     // ANCHOR - Hover provider registration
     const hoverProvider = vscode.languages.registerHoverProvider("*", {
         provideHover(document, position) {
@@ -250,7 +273,8 @@ function activate(context) {
         connectCommand,
         updateCommand,
         hoverProvider,
-        openUriCommand
+        openUriCommand,
+        pickDirectoriesCommand
     );
     log("Extension fully initialized");
 }
@@ -377,6 +401,91 @@ async function isVaultModified(vaultPath) {
     }
 }
 
+// FUNC - Let user pick directories to include
+async function pickDirectories(vaultPath) {
+    try {
+        // Load previously selected directories from global state
+        const savedDirectories = vscodeContext.globalState.get('selectedDirectories') || [];
+        selectedDirectories = new Set(savedDirectories);
+
+        // Get root directories from vault
+        const rootDirs = await getRootDirectories(vaultPath);
+
+        // Prepare items for QuickPick
+        const items = [
+            {
+                label: 'Notes In Root',
+                picked: selectedDirectories.has('Notes In Root'),
+                alwaysShow: true
+            },
+            ...rootDirs.map(dir => ({
+                label: dir,
+                picked: selectedDirectories.has(dir),
+                alwaysShow: true
+            }))
+        ];
+
+        const quickPick = vscode.window.createQuickPick();
+        quickPick.items = items;
+        quickPick.canSelectMany = true;
+        quickPick.selectedItems = items.filter(item => item.picked);
+        quickPick.title = 'Select Directories to Include';
+        quickPick.placeholder = 'Choose directories (at least one must be selected)';
+
+        // Handle real-time selection changes
+        quickPick.onDidChangeSelection(selectedItems => {
+            const selectedLabels = selectedItems.map(item => item.label);
+
+            // Prevent empty selection
+            if (selectedItems.length === 0) {
+                vscode.window.showWarningMessage('At least one directory must be selected');
+                return;
+            }
+
+            // Update selected directories
+            selectedDirectories = new Set(selectedLabels);
+        });
+
+        // Handle acceptance of selection
+        quickPick.onDidAccept(async () => {
+            const selectedLabels = quickPick.selectedItems.map(item => item.label);
+
+            // Prevent empty selection
+            if (selectedLabels.length === 0) {
+                vscode.window.showWarningMessage('At least one directory must be selected');
+                return;
+            }
+
+            // Save selection to global state
+            await vscodeContext.globalState.update('selectedDirectories', Array.from(selectedDirectories));
+
+            // Update notes based on selection
+            await updateNotesInformation(vaultPath, true);
+
+            quickPick.hide();
+        });
+
+        quickPick.show();
+    } catch (error) {
+        log(`Error in pickDirectories: ${error.message}`);
+        vscode.window.showErrorMessage(`Failed to load directories: ${error.message}`);
+    }
+}
+
+//FUNC - Get root directories
+async function getRootDirectories(vaultPath) {
+    try {
+        const entries = await fs.promises.readdir(vaultPath, { withFileTypes: true });
+        return entries
+            .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+            .map(entry => entry.name);
+    } catch (error) {
+        log(`Error getting root directories: ${error.message}`);
+        throw error;
+    }
+}
+
+
 //FUNC - Update list of notes and aliases for the connected vault (or don't if up to date)
 async function updateNotesInformation(vaultPath, force = false) {
     try {
@@ -492,23 +601,32 @@ async function loadVaultNotes(vaultPath) {
                 .map((line) => line.substring(4).trim());
         }
         await scanVaultDirectory(vaultPath, async (fullPath) => {
-            const aliases = await extractAliases(fullPath);
+            // Check if the note should be included based on selected directories
             const relativePath = path.relative(vaultPath, fullPath);
-            const obsidianUri = createObsidianUri(vaultPath, relativePath);
+            const rootDir = relativePath.split(path.sep)[0];
 
-            const noteInfo = {
-                path: fullPath,
-                relativePath: relativePath,
-                aliases: aliases,
-                uri: obsidianUri,
-            };
-            notes.push(noteInfo);
+            // If "All" is selected or the file is in a selected directory
+            if (selectedDirectories.has('All') ||
+                (rootDir === '' && selectedDirectories.has('Notes In Root')) ||
+                selectedDirectories.has(rootDir)) {
 
-            log(`Found note: ${fullPath}`);
-            if (aliases.length > 0) {
-                log(`  Aliases: ${aliases.join(", ")}`);
+                const aliases = await extractAliases(fullPath);
+                const obsidianUri = createObsidianUri(vaultPath, relativePath);
+
+                const noteInfo = {
+                    path: fullPath,
+                    relativePath: relativePath,
+                    aliases: aliases,
+                    uri: obsidianUri,
+                };
+                notes.push(noteInfo);
+
+                log(`Found note: ${fullPath}`);
+                if (aliases.length > 0) {
+                    log(`  Aliases: ${aliases.join(", ")}`);
+                }
+                log(`  URI: ${obsidianUri}`);
             }
-            log(`  URI: ${obsidianUri}`);
         });
 
         log(`Total notes found: ${notes.length}`);
