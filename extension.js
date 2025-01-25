@@ -5,45 +5,69 @@ const os = require("os");
 
 // Global output channel for logging
 let outputChannel;
-
-// Cache for notes information (Tiles and Aliases)
-let notesCache = new Map();
+// Timestamp of the last update of notes information
 let lastUpdateTime = 0;
 // List of directories to scan for notes that are selected by the user
-let selectedDirectories = new Set(['Notes In Root']);
-// Context (state) of the extension as global variable
+let selectedDirectories = new Set(["Notes In Root"]);
+
+// Context (state) of the extension as global variable (for use in functions)
 let vscodeContext;
+
+// Path to the cache file for saving notes information between sessions
+const CACHE_FILENAME = "notes-cache.json";
+// Temporary cache for notes information (Tiles and Aliases)
+let notesCache = new Map();
 
 //FUNC - Activate the extension (Entry point)
 function activate(context) {
-
     vscodeContext = context; // Save context globally
 
     // Initialize logging and cache systems
     initializeLogging();
-    notesCache.clear();
-    lastUpdateTime = 0;
+
+    // Restore selected directories from global state
+    const savedDirectories = context.globalState.get("selectedDirectories");
+    if (savedDirectories) {
+        selectedDirectories = new Set(savedDirectories);
+    }
+
     log("Extension activated!");
 
     // Update notes information for connected vault on activation
     (async () => {
-        const connectedVault = context.globalState.get("connectedVault");
-        if (!connectedVault) {
-            log("No connected vault found. Skipping automatic update.");
-            return;
-        }
-
         try {
+            // Load cache and check if it was successful
+            const cacheLoaded = await loadCache();
+            if (!cacheLoaded) {
+                // Only clear cache if loading failed
+                notesCache.clear();
+                lastUpdateTime = 0;
+                log("No cache found, starting fresh");
+            } else {
+                log("Cache loaded successfully");
+            }
+
+            // Check if a vault is connected. If so, update notes information
+            const connectedVault = context.globalState.get("connectedVault");
+            if (!connectedVault) {
+                log("No connected vault found. Skipping automatic update.");
+                return;
+            }
+
             log(`Connected vault found: ${connectedVault}`);
+            // Check if vault has been modified since last update.
             const needsRefresh = await isVaultModified(connectedVault);
+            //If so, update notes information
             if (needsRefresh) {
                 log("Vault has been modified. Updating notes information...");
                 await updateNotesInformation(connectedVault, true);
-            } else {
-                log("Vault is up to date. No update needed.");
+            }
+            //If not, use cached data
+            else {
+                log("Vault is up to date. Using cached data.");
             }
         } catch (error) {
-            log(`Error during automatic update: ${error.message}`);
+            log(`Error during initialization: ${error.message}`);
         }
     })();
 
@@ -64,6 +88,13 @@ function activate(context) {
                     );
                     notesCache.clear();
                     lastUpdateTime = 0;
+                    // Clear cache file instead of deleting
+                    try {
+                        await saveCache(); // This will save empty cache
+                        log("Cache cleared on disconnect");
+                    } catch (error) {
+                        log(`Error clearing cache file: ${error.message}`);
+                    }
                     vscode.window.showInformationMessage(
                         `Disconnected from vault: ${connectedVault}`
                     );
@@ -117,7 +148,6 @@ function activate(context) {
 
                             // Let user pick directories on connection
                             await pickDirectories(selectedVault.description);
-
                         } catch (error) {
                             vscode.window.showErrorMessage(
                                 `Failed to scan vault: ${error.message}`
@@ -214,11 +244,14 @@ function activate(context) {
 
     // ANCHOR - Command registration for "Pick Directories" command
     let pickDirectoriesCommand = vscode.commands.registerCommand(
-        'obsidian-tooltips.pickDirectories',
+        "obsidian-tooltips.pickDirectories",
         async () => {
-            const connectedVault = vscodeContext.globalState.get('connectedVault');
+            const connectedVault =
+                vscodeContext.globalState.get("connectedVault");
             if (!connectedVault) {
-                vscode.window.showWarningMessage('Please connect to an Obsidian vault first');
+                vscode.window.showWarningMessage(
+                    "Please connect to an Obsidian vault first"
+                );
                 return;
             }
             await pickDirectories(connectedVault);
@@ -279,7 +312,15 @@ function activate(context) {
     log("Extension fully initialized");
 }
 
+//FUNC - Deactivate the extension. On deactivation, save the cache to file if possible
 function deactivate() {
+    try {
+        saveCache().catch((error) =>
+            log(`Error saving cache on deactivation: ${error.message}`)
+        );
+    } catch (error) {
+        log(`Error in deactivate: ${error.message}`);
+    }
     log("Extension deactivated");
 }
 
@@ -288,6 +329,65 @@ module.exports = {
     deactivate,
 };
 
+//SECTION - Cache functions
+
+//FUNC - Get the path to the cache file
+async function getCachePath() {
+    const extensionPath = vscodeContext.globalStorageUri.fsPath;
+    await fs.promises.mkdir(extensionPath, { recursive: true });
+    return path.join(extensionPath, CACHE_FILENAME);
+}
+
+//FUNC - Load the cache file and add notes information to the cache
+async function saveCache() {
+    try {
+        const cachePath = await getCachePath();
+        const cacheData = {
+            notes: Array.from(notesCache.entries()),
+            timestamp: lastUpdateTime,
+        };
+        await fs.promises.writeFile(
+            cachePath,
+            JSON.stringify(cacheData, null, 2)
+        );
+        log(`Cache saved to ${cachePath}`);
+    } catch (error) {
+        log(`Error saving cache: ${error.message}`);
+        throw error;
+    }
+}
+
+//FUNC - Load the cache file as data for current session
+async function loadCache() {
+    try {
+        const cachePath = await getCachePath();
+        const exists = await fs.promises
+            .access(cachePath)
+            .then(() => true)
+            .catch(() => false);
+
+        if (!exists) {
+            log("No cache file found");
+            return false;
+        }
+
+        const cacheContent = await fs.promises.readFile(cachePath, "utf-8");
+        const cacheData = JSON.parse(cacheContent);
+
+        notesCache = new Map(cacheData.notes);
+        lastUpdateTime = cacheData.timestamp;
+
+        log(`Cache loaded from ${cachePath}`);
+        return true;
+    } catch (error) {
+        log(`Error loading cache: ${error.message}`);
+        return false;
+    }
+}
+
+//!SECTION - Cache functions
+
+//SECTION - Utility functions
 //FUNC - Initialize the output channel for logging
 function initializeLogging() {
     outputChannel = vscode.window.createOutputChannel("Obsidian Tooltips");
@@ -298,6 +398,8 @@ function initializeLogging() {
 function log(message) {
     outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
 }
+
+//!SECTION - Utility functions
 
 //FUNC - Find the path to the Obsidian program
 async function findObsidian() {
@@ -405,7 +507,8 @@ async function isVaultModified(vaultPath) {
 async function pickDirectories(vaultPath) {
     try {
         // Load previously selected directories from global state
-        const savedDirectories = vscodeContext.globalState.get('selectedDirectories') || [];
+        const savedDirectories =
+            vscodeContext.globalState.get("selectedDirectories") || [];
         selectedDirectories = new Set(savedDirectories);
 
         // Get root directories from vault
@@ -414,31 +517,34 @@ async function pickDirectories(vaultPath) {
         // Prepare items for QuickPick
         const items = [
             {
-                label: 'Notes In Root',
-                picked: selectedDirectories.has('Notes In Root'),
-                alwaysShow: true
+                label: "Notes In Root",
+                picked: selectedDirectories.has("Notes In Root"),
+                alwaysShow: true,
             },
-            ...rootDirs.map(dir => ({
+            ...rootDirs.map((dir) => ({
                 label: dir,
                 picked: selectedDirectories.has(dir),
-                alwaysShow: true
-            }))
+                alwaysShow: true,
+            })),
         ];
 
         const quickPick = vscode.window.createQuickPick();
         quickPick.items = items;
         quickPick.canSelectMany = true;
-        quickPick.selectedItems = items.filter(item => item.picked);
-        quickPick.title = 'Select Directories to Include';
-        quickPick.placeholder = 'Choose directories (at least one must be selected)';
+        quickPick.selectedItems = items.filter((item) => item.picked);
+        quickPick.title = "Select Directories to Include";
+        quickPick.placeholder =
+            "Choose directories (at least one must be selected)";
 
         // Handle real-time selection changes
-        quickPick.onDidChangeSelection(selectedItems => {
-            const selectedLabels = selectedItems.map(item => item.label);
+        quickPick.onDidChangeSelection((selectedItems) => {
+            const selectedLabels = selectedItems.map((item) => item.label);
 
             // Prevent empty selection
             if (selectedItems.length === 0) {
-                vscode.window.showWarningMessage('At least one directory must be selected');
+                vscode.window.showWarningMessage(
+                    "At least one directory must be selected"
+                );
                 return;
             }
 
@@ -447,20 +553,31 @@ async function pickDirectories(vaultPath) {
         });
 
         // Handle acceptance of selection
+        // Handle acceptance of selection
         quickPick.onDidAccept(async () => {
-            const selectedLabels = quickPick.selectedItems.map(item => item.label);
+            const selectedLabels = quickPick.selectedItems.map(
+                (item) => item.label
+            );
 
             // Prevent empty selection
             if (selectedLabels.length === 0) {
-                vscode.window.showWarningMessage('At least one directory must be selected');
+                vscode.window.showWarningMessage(
+                    "At least one directory must be selected"
+                );
                 return;
             }
 
             // Save selection to global state
-            await vscodeContext.globalState.update('selectedDirectories', Array.from(selectedDirectories));
+            await vscodeContext.globalState.update(
+                "selectedDirectories",
+                Array.from(selectedDirectories)
+            );
 
             // Update notes based on selection
             await updateNotesInformation(vaultPath, true);
+
+            // Save cache after updating notes
+            await saveCache();
 
             quickPick.hide();
         });
@@ -468,23 +585,28 @@ async function pickDirectories(vaultPath) {
         quickPick.show();
     } catch (error) {
         log(`Error in pickDirectories: ${error.message}`);
-        vscode.window.showErrorMessage(`Failed to load directories: ${error.message}`);
+        vscode.window.showErrorMessage(
+            `Failed to load directories: ${error.message}`
+        );
     }
 }
 
 //FUNC - Get root directories
 async function getRootDirectories(vaultPath) {
     try {
-        const entries = await fs.promises.readdir(vaultPath, { withFileTypes: true });
+        const entries = await fs.promises.readdir(vaultPath, {
+            withFileTypes: true,
+        });
         return entries
-            .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
-            .map(entry => entry.name);
+            .filter(
+                (entry) => entry.isDirectory() && !entry.name.startsWith(".")
+            )
+            .map((entry) => entry.name);
     } catch (error) {
         log(`Error getting root directories: ${error.message}`);
         throw error;
     }
 }
-
 
 //FUNC - Update list of notes and aliases for the connected vault (or don't if up to date)
 async function updateNotesInformation(vaultPath, force = false) {
@@ -502,7 +624,8 @@ async function updateNotesInformation(vaultPath, force = false) {
         log("Starting notes information update");
         const notes = await loadVaultNotes(vaultPath);
 
-        // Clear and update cache
+        // Update cache with new notes information
+        notesCache.clear();
         notes.forEach((note) => {
             const relativePath = path.relative(vaultPath, note.path);
             notesCache.set(relativePath, {
@@ -511,15 +634,22 @@ async function updateNotesInformation(vaultPath, force = false) {
                 uri: note.uri,
             });
         });
-
-        // Update last update timestamp
+        // Update last update time
         lastUpdateTime = Date.now();
+        // Save cache to file
+        try {
+            await saveCache();
+            log("Cache saved successfully");
+        } catch (error) {
+            log(`Warning: Failed to save cache: ${error.message}`);
+            // Continue execution even if cache save fails
+        }
 
         // Log results
+        //STUB - List all notes and aliases in the output channel
         outputChannel.appendLine(
             `\nUpdated information for ${notes.length} notes:`
         );
-        //STUB - List all notes and aliases in the output channel
         notesCache.forEach((noteInfo, relativePath) => {
             outputChannel.appendLine(`→ ${relativePath}`);
             if (noteInfo.aliases.length > 0) {
@@ -606,10 +736,11 @@ async function loadVaultNotes(vaultPath) {
             const rootDir = relativePath.split(path.sep)[0];
 
             // If "All" is selected or the file is in a selected directory
-            if (selectedDirectories.has('All') ||
-                (rootDir === '' && selectedDirectories.has('Notes In Root')) ||
-                selectedDirectories.has(rootDir)) {
-
+            if (
+                selectedDirectories.has("All") ||
+                (rootDir === "" && selectedDirectories.has("Notes In Root")) ||
+                selectedDirectories.has(rootDir)
+            ) {
                 const aliases = await extractAliases(fullPath);
                 const obsidianUri = createObsidianUri(vaultPath, relativePath);
 
