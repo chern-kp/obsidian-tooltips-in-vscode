@@ -11,6 +11,7 @@ You can use this extension to connect to the Obsidian vault that you use as your
 - Display note content in tooltip after hovering over text matching note titles or aliases from your Obsidian vault
   - Full support for Obsidian note aliases defined in YAML frontmatter
 - Choose specific directories within your vault to include in the search scope
+- Setting to underline matched keywords
 
 ## Requirements
 
@@ -19,6 +20,12 @@ You can use this extension to connect to the Obsidian vault that you use as your
 - An existing Obsidian vault, filled with notes with titles or aliases corresponding to words you will find while code editing (keyword of programming language etc)
 
 ## Extension Settings
+## Extension Settings
+
+This extension contributes the following settings:
+
+* `obsidian-tooltips.enableExternalLinks`: Enable/disable opening Obsidian links from tooltips (Default: Enabled)
+* `obsidian-tooltips.enableWordUnderline`: Enable/disable underlining of matched keywords that correspond to your Obsidian notes (Default: Disabled)
 
 ## Known Issues
 
