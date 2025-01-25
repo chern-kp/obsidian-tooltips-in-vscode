@@ -35,8 +35,13 @@
         "languages": [
             {
                 "id": "plaintext",
-                "aliases": ["Plain Text", "text"],
-                "extensions": [".txt"],
+                "aliases": [
+                    "Plain Text",
+                    "text"
+                ],
+                "extensions": [
+                    ".txt"
+                ],
                 "configuration": "./language-configuration.json"
             }
         ],
@@ -48,10 +53,10 @@
                     "default": true,
                     "description": "Enable opening Obsidian links from tooltips"
                 },
-                "obsidian-tooltips.connectedVault": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Path to connected Obsidian vault"
+                "obsidian-tooltips.enableWordUnderline": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable underlining of matched keywords"
                 }
             }
         }
@@ -75,7 +80,9 @@
         "@vscode/test-cli": "^0.0.10",
         "@vscode/test-electron": "^2.4.1"
     },
-    "extensionKind": ["workspace"],
+    "extensionKind": [
+        "workspace"
+    ],
     "enableApiProposed": true,
     "dependencies": {
         "vscode-uri": "^3.0.8"
