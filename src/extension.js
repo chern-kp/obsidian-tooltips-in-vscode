@@ -21,6 +21,8 @@ let notesCache = new Map();
 
 // Setting: Enable underlining of matched keywords
 let matchedWordDecoration;
+// Timer for decoration updates (to prevent too frequent updates)
+let decorationTimer = null;
 
 //FUNC - Activate the extension (Entry point)
 function activate(context) {
@@ -31,18 +33,23 @@ function activate(context) {
     //SECTION - Setting: Enable underlining of matched keywords
     // Initialize decoration type
     matchedWordDecoration = vscode.window.createTextEditorDecorationType({
-        textDecoration: "none; border-bottom: 2px solid #9141AC",
+        textDecoration: 'none; border-bottom: 2px solid #9141AC',
+        light: {
+            borderColor: '#9141AC'
+        },
+        dark: {
+            borderColor: '#9141AC'
+        }
     });
 
     // Watch for configuration changes
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((event) => {
-            if (
-                event.affectsConfiguration(
-                    "obsidian-tooltips.enableWordUnderline"
-                )
-            ) {
-                updateDecorations();
+            if (event.affectsConfiguration("obsidian-tooltips.enableWordUnderline")) {
+                if (decorationTimer) clearTimeout(decorationTimer);
+                decorationTimer = setTimeout(() => {
+                    updateDecorations();
+                }, 250);
             }
         })
     );
@@ -50,7 +57,10 @@ function activate(context) {
     // Watch for active editor changes
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(() => {
-            updateDecorations();
+            if (decorationTimer) clearTimeout(decorationTimer);
+            decorationTimer = setTimeout(() => {
+                updateDecorations();
+            }, 250);
         })
     );
 
@@ -59,7 +69,10 @@ function activate(context) {
         vscode.workspace.onDidChangeTextDocument((event) => {
             const editor = vscode.window.activeTextEditor;
             if (editor && event.document === editor.document) {
-                updateDecorations();
+                if (decorationTimer) clearTimeout(decorationTimer);
+                decorationTimer = setTimeout(() => {
+                    updateDecorations();
+                }, 250);
             }
         })
     );
@@ -355,13 +368,14 @@ function activate(context) {
 //FUNC - Deactivate the extension. On deactivation, save the cache to file if possible
 function deactivate() {
     try {
-        // Clear decorations (Setting: Enable underlining of matched keywords)
         if (matchedWordDecoration) {
             for (const editor of vscode.window.visibleTextEditors) {
                 editor.setDecorations(matchedWordDecoration, []);
             }
         }
-
+        if (decorationTimer) {
+            clearTimeout(decorationTimer);
+        }
         saveCache().catch((error) =>
             log(`Error saving cache on deactivation: ${error.message}`)
         );
@@ -454,6 +468,7 @@ function updateDecorations() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
+    // Check if feature is enabled
     const isEnabled = vscode.workspace
         .getConfiguration("obsidian-tooltips")
         .get("enableWordUnderline");
@@ -462,25 +477,29 @@ function updateDecorations() {
         return;
     }
 
+    // Scan the document for words and highlight them
     const text = editor.document.getText();
     const decorations = [];
-    const wordRegex = /\w+/g;
-    let match;
+    const wordRegex = /\b\w+\b/g; // More precise word boundary matching
 
+    let match;
     while ((match = wordRegex.exec(text)) !== null) {
         const word = match[0];
-        const startPos = editor.document.positionAt(match.index);
-        const endPos = editor.document.positionAt(match.index + word.length);
 
-        // Check if word matches any note or alias
+        // Skip single-character words
+        if (word.length < 2) continue;
+
         const noteMatch = findNoteMatch(word);
         if (noteMatch) {
+            const startPos = editor.document.positionAt(match.index);
+            const endPos = editor.document.positionAt(match.index + word.length);
             decorations.push({
-                range: new vscode.Range(startPos, endPos),
+                range: new vscode.Range(startPos, endPos)
             });
         }
     }
 
+    // Apply decorations to the editor
     editor.setDecorations(matchedWordDecoration, decorations);
 }
 
