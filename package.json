@@ -12,7 +12,7 @@
     "activationEvents": [
         "onLanguage:*"
     ],
-    "main": "./extension.js",
+    "main": "src/extension.js",
     "contributes": {
         "commands": [
             {
@@ -57,6 +57,12 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Enable underlining of matched keywords"
+                },
+                "obsidian-tooltips.noteContentDisplay": {
+                    "type": "string",
+                    "enum": ["disabled", "showPreHeader"],
+                    "default": "disabled",
+                    "description": "Controls how note content is displayed in tooltips. 'disabled': show no content, 'showPreHeader': show content until first header"
                 }
             }
         }

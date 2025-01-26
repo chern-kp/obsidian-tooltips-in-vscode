@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
+//ANCHOR - Global variables
 // Global output channel for logging
 let outputChannel;
 // Timestamp of the last update of notes information
@@ -33,31 +34,35 @@ function activate(context) {
         textDecoration: "none; border-bottom: 2px solid #9141AC",
     });
 
-// Watch for configuration changes
-context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration(event => {
-        if (event.affectsConfiguration('obsidian-tooltips.enableWordUnderline')) {
-            updateDecorations();
-        }
-    })
-);
+    // Watch for configuration changes
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration((event) => {
+            if (
+                event.affectsConfiguration(
+                    "obsidian-tooltips.enableWordUnderline"
+                )
+            ) {
+                updateDecorations();
+            }
+        })
+    );
 
-// Watch for active editor changes
-context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(() => {
-        updateDecorations();
-    })
-);
-
-// Watch for document changes
-context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument(event => {
-        const editor = vscode.window.activeTextEditor;
-        if (editor && event.document === editor.document) {
+    // Watch for active editor changes
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(() => {
             updateDecorations();
-        }
-    })
-);
+        })
+    );
+
+    // Watch for document changes
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument((event) => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor && event.document === editor.document) {
+                updateDecorations();
+            }
+        })
+    );
 
     //!SECTION - Setting: Enable underlining of matched keywords
     // Restore selected directories from global state
@@ -449,7 +454,9 @@ function updateDecorations() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    const isEnabled = vscode.workspace.getConfiguration('obsidian-tooltips').get('enableWordUnderline');
+    const isEnabled = vscode.workspace
+        .getConfiguration("obsidian-tooltips")
+        .get("enableWordUnderline");
     if (!isEnabled) {
         editor.setDecorations(matchedWordDecoration, []);
         return;
@@ -469,7 +476,7 @@ function updateDecorations() {
         const noteMatch = findNoteMatch(word);
         if (noteMatch) {
             decorations.push({
-                range: new vscode.Range(startPos, endPos)
+                range: new vscode.Range(startPos, endPos),
             });
         }
     }
@@ -630,7 +637,6 @@ async function pickDirectories(vaultPath) {
             selectedDirectories = new Set(selectedLabels);
         });
 
-        // Handle acceptance of selection
         // Handle acceptance of selection
         quickPick.onDidAccept(async () => {
             const selectedLabels = quickPick.selectedItems.map(
