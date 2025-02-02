@@ -33,19 +33,23 @@ function activate(context) {
     //SECTION - Setting: Enable underlining of matched keywords
     // Initialize decoration type
     matchedWordDecoration = vscode.window.createTextEditorDecorationType({
-        textDecoration: 'none; border-bottom: 2px solid #9141AC',
+        textDecoration: "none; border-bottom: 2px solid #9141AC",
         light: {
-            borderColor: '#9141AC'
+            borderColor: "#9141AC",
         },
         dark: {
-            borderColor: '#9141AC'
-        }
+            borderColor: "#9141AC",
+        },
     });
 
     // Watch for configuration changes
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((event) => {
-            if (event.affectsConfiguration("obsidian-tooltips.enableWordUnderline")) {
+            if (
+                event.affectsConfiguration(
+                    "obsidian-tooltips.enableWordUnderline"
+                )
+            ) {
                 if (decorationTimer) clearTimeout(decorationTimer);
                 decorationTimer = setTimeout(() => {
                     updateDecorations();
@@ -312,47 +316,83 @@ function activate(context) {
     );
 
     // ANCHOR - Hover provider registration
-    const hoverProvider = vscode.languages.registerHoverProvider("*", {
-        provideHover(document, position) {
-            const connectedVault = context.globalState.get("connectedVault");
-            if (!connectedVault) {
-                return;
-            }
+    const hoverProvider = vscode.languages.registerHoverProvider(
+        { scheme: "file", pattern: "**/*" },
+        {
+            async provideHover(document, position) {
+                const connectedVault =
+                    context.globalState.get("connectedVault");
+                if (!connectedVault) return;
 
-            const range = document.getWordRangeAtPosition(position);
-            if (!range) {
-                return;
-            }
-
-            const word = document.getText(range);
-            const match = findNoteMatch(word);
-
-            if (match && match.uri) {
-                const message = new vscode.MarkdownString("", true);
-                message.isTrusted = true;
-                message.supportHtml = true;
-
-                // Create content with cached URI
-                if (match.type === "title") {
-                    message.appendMarkdown(
-                        `**Note found**\n\nPath: \`${match.path}\`\n\n`
-                    );
-                } else {
-                    message.appendMarkdown(
-                        `**Note found via alias**\n\nAlias: \`${match.matchedAlias}\`\nPath: \`${match.path}\`\n\n`
-                    );
-                }
-
-                message.appendMarkdown(
-                    `[Open in Obsidian](command:obsidian-tooltips.openObsidianUri?${encodeURIComponent(
-                        JSON.stringify([match.uri])
-                    )})`
+                const range = document.getWordRangeAtPosition(
+                    position,
+                    /([\w-]+)/g
                 );
+                if (!range) return;
 
-                return new vscode.Hover(message);
-            }
-        },
-    });
+                const word = document.getText(range);
+                const match = findNoteMatch(word);
+
+                if (match && match.uri) {
+                    const message = new vscode.MarkdownString("", true);
+                    message.isTrusted = true;
+                    message.supportHtml = true;
+
+                    // Get cached note info
+                    const noteInfo = notesCache.get(match.path);
+
+                    // Note title
+                    const noteTitle = path.basename(match.path, ".md");
+                    message.appendMarkdown(`**${noteTitle}**\n\n`);
+
+                    // Relative path
+                    message.appendMarkdown(`📁 \`${match.path}\`\n`);
+
+                    // Aliases
+                    if (noteInfo?.aliases?.length > 0) {
+                        message.appendMarkdown(
+                            `🏷️ ${noteInfo.aliases.join(", ")}\n`
+                        );
+                    }
+
+                    // Open button
+                    message.appendMarkdown(
+                        `\n[🔗 Open in Obsidian](command:obsidian-tooltips.openObsidianUri?${encodeURIComponent(
+                            JSON.stringify([match.uri])
+                        )})`
+                    );
+
+                    // Pre-header content
+                    const noteContentDisplay = vscode.workspace
+                        .getConfiguration("obsidian-tooltips")
+                        .get("noteContentDisplay");
+
+                    if (noteContentDisplay === "showPreHeader") {
+                        try {
+                            const content = await getNoteContent(
+                                match.fullPath
+                            );
+                            if (content) {
+                                message.appendMarkdown(
+                                    `\n\n\`\`\`\n${content}\n\`\`\``
+                                );
+                                log(
+                                    `Pre-header content for ${match.path}:\n${content}`
+                                );
+                            }
+                        } catch (error) {
+                            log(`Note content error: ${error.message}`);
+                        }
+                    }
+
+                    return new vscode.Hover(message);
+                }
+            },
+        }
+    );
+
+    // Register provider first in subscriptions array for priority
+    context.subscriptions.splice(0, 0, hoverProvider);
 
     // Register all commands and providers
     context.subscriptions.push(
@@ -460,6 +500,46 @@ function log(message) {
     outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
 }
 
+async function getNoteContent(filePath) {
+    try {
+        const content = await fs.promises.readFile(filePath, "utf-8");
+        const lines = content.split("\n");
+        let inFrontmatter = false;
+        let contentBuffer = [];
+        let collectingContent = false;
+
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+
+            // Detect frontmatter boundaries
+            if (trimmedLine === "---") {
+                inFrontmatter = !inFrontmatter;
+                collectingContent = !inFrontmatter; // Start collecting after frontmatter ends
+                continue;
+            }
+
+            // Skip lines inside frontmatter
+            if (inFrontmatter) continue;
+
+            // Stop at first H1 header (exact match for "# " at line start)
+            if (line.startsWith("# ")) {
+                break;
+            }
+
+            // Collect content between frontmatter and first header
+            if (collectingContent || !inFrontmatter) {
+                contentBuffer.push(line);
+            }
+        }
+
+        // Join lines and clean trailing whitespace/newlines
+        return contentBuffer.join("\n").replace(/[\n\r\s]+$/, "");
+    } catch (error) {
+        log(`Error reading note content for ${filePath}: ${error.message}`);
+        return "";
+    }
+}
+
 //!SECTION - Utility functions
 
 //SECTION - Functions for settings
@@ -492,9 +572,11 @@ function updateDecorations() {
         const noteMatch = findNoteMatch(word);
         if (noteMatch) {
             const startPos = editor.document.positionAt(match.index);
-            const endPos = editor.document.positionAt(match.index + word.length);
+            const endPos = editor.document.positionAt(
+                match.index + word.length
+            );
             decorations.push({
-                range: new vscode.Range(startPos, endPos)
+                range: new vscode.Range(startPos, endPos),
             });
         }
     }
