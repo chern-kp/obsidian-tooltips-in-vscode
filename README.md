@@ -20,7 +20,6 @@ You can use this extension to connect to the Obsidian vault that you use as your
 - An existing Obsidian vault, filled with notes with titles or aliases corresponding to words you will find while code editing (keyword of programming language etc)
 
 ## Extension Settings
-## Extension Settings
 
 This extension contributes the following settings:
 

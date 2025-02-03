@@ -24,6 +24,14 @@ let matchedWordDecoration;
 // Timer for decoration updates (to prevent too frequent updates)
 let decorationTimer = null;
 
+const SEARCH_CONFIG = {
+    // Regex pattern for matching words including allowed characters
+    WORD_PATTERN: /(?:\b|^)([A-Za-z0-9]+(?:[.\-_:()]*[A-Za-z0-9]+)*)(?=\b|$)/g,
+    // Comparison options (true is case-insensitive, false is case-sensitive)
+    CASE_INSENSITIVE: true,
+    ALLOWEDCHARS: "A-Za-z0-9-_.(){}[]:;!?+=<>*/\\"
+};
+
 //FUNC - Activate the extension (Entry point)
 function activate(context) {
     vscodeContext = context; // Save context globally
@@ -325,8 +333,7 @@ function activate(context) {
                 if (!connectedVault) return;
 
                 const range = document.getWordRangeAtPosition(
-                    position,
-                    /([\w-]+)/g
+                    position,SEARCH_CONFIG.WORD_PATTERN
                 );
                 if (!range) return;
 
@@ -560,7 +567,7 @@ function updateDecorations() {
     // Scan the document for words and highlight them
     const text = editor.document.getText();
     const decorations = [];
-    const wordRegex = /\b\w+\b/g; // More precise word boundary matching
+    const wordRegex = SEARCH_CONFIG.WORD_PATTERN;
 
     let match;
     while ((match = wordRegex.exec(text)) !== null) {
@@ -956,36 +963,73 @@ async function loadVaultNotes(vaultPath) {
 
 //FUNC - Find a note or alias that matches the word user is hovering over
 function findNoteMatch(word) {
-    // Convert word to lowercase for case-insensitive comparison
-    const searchWord = word.toLowerCase();
+    const caseInsensitive = SEARCH_CONFIG.CASE_INSENSITIVE;
+
+    // Search for exact match with original word
+    let exactMatch = findExactMatch(word, caseInsensitive, false);
+    if (exactMatch) {
+        return exactMatch;
+    }
+
+    // Match with normalized word
+    const normalizedWord = normalizeForComparison(word, caseInsensitive);
+    return findExactMatch(normalizedWord, caseInsensitive, true);
+}
+
+//FUNC - Find an exact match for a word
+function findExactMatch(searchWord, caseInsensitive, applyNormalization) {
+    const normalizedSearch = caseInsensitive ? searchWord.toLowerCase() : searchWord;
 
     for (const [relativePath, noteInfo] of notesCache.entries()) {
-        // Check if word matches the note filename (without extension)
-        const fileName = path.basename(relativePath, ".md").toLowerCase();
-        if (fileName === searchWord) {
+        const fileName = path.basename(relativePath, ".md");
+        let compareName;
+
+        if (applyNormalization) {
+            compareName = normalizeForComparison(fileName, caseInsensitive);
+        } else {
+            compareName = caseInsensitive ? fileName.toLowerCase() : fileName;
+        }
+
+        if (compareName === normalizedSearch) {
             return {
                 path: relativePath,
                 fullPath: noteInfo.fullPath,
-                type: "title",
+                type: "filename",
                 uri: noteInfo.uri,
             };
         }
 
-        // Check if word exactly matches any aliases
-        const aliasMatch = noteInfo.aliases.find(
-            (alias) => alias.toLowerCase() === searchWord
-        );
-        if (aliasMatch) {
-            return {
-                path: relativePath,
-                fullPath: noteInfo.fullPath,
-                type: "alias",
-                matchedAlias: aliasMatch,
-                uri: noteInfo.uri,
-            };
+        // Check aliases
+        for (const alias of noteInfo.aliases) {
+            let compareAlias;
+            if (applyNormalization) {
+                compareAlias = normalizeForComparison(alias, caseInsensitive);
+            } else {
+                compareAlias = caseInsensitive ? alias.toLowerCase() : alias;
+            }
+
+            if (compareAlias === normalizedSearch) {
+                return {
+                    path: relativePath,
+                    fullPath: noteInfo.fullPath,
+                    type: "alias",
+                    matchedAlias: alias,
+                    uri: noteInfo.uri,
+                };
+            }
         }
     }
+
     return null;
+}
+
+//FUNC - Normalize a string for comparison
+function normalizeForComparison(str, caseInsensitive) {
+    let normalized = str.replace(/[^\w.-]+$/, ''); // Remove trailing non-allowed characters
+    if (caseInsensitive) {
+        normalized = normalized.toLowerCase();
+    }
+    return normalized;
 }
 
 //FUNC - Create an Obsidian URI for a note path
