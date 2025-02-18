@@ -5,7 +5,7 @@ const CACHE_FILENAME = "notes-cache.json";
 
 //FUNC - Get the path to the cache file
 // vscodeContext - The context object from the extension, we use it to get the path to the global storage directory
-export async function getCachePath(vscodeContext) {
+async function getCachePath(vscodeContext) {
     // Get the path to the global storage directory
     const extensionPath = vscodeContext.globalStorageUri.fsPath;
     // Creates directory for extension storage if it doesn't exist
@@ -15,7 +15,7 @@ export async function getCachePath(vscodeContext) {
 }
 
 //FUNC - Load the cache file and add notes information to the cache
-export async function saveCache(vscodeContext, notesCache, lastUpdateTime, log) {
+async function saveCache(vscodeContext, notesCache, lastUpdateTime, log) {
     try {
         // Get the path to the cache file from getCachePath function
         const cachePath = await getCachePath(vscodeContext);
@@ -38,7 +38,7 @@ export async function saveCache(vscodeContext, notesCache, lastUpdateTime, log) 
 }
 
 //FUNC - Load the cache file as data for current session
-export async function loadCache(vscodeContext, notesCache, lastUpdateTime, log) {
+async function loadCache(vscodeContext, notesCache, lastUpdateTime, log) {
     try {
         // Get the path to the cache file from getCachePath function
         const cachePath = await getCachePath(vscodeContext);
@@ -69,3 +69,9 @@ export async function loadCache(vscodeContext, notesCache, lastUpdateTime, log) 
         return { notesCache, lastUpdateTime, cacheLoaded: false };
     }
 }
+
+module.exports = { // <-- Экспорт функций через module.exports
+    getCachePath,
+    saveCache,
+    loadCache
+};

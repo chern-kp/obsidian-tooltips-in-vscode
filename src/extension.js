@@ -1,11 +1,9 @@
-const vscode = require("vscode");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
-// Import cache functions from separate file
 const { saveCache, loadCache } = require('./utils/cache');
-
 
 //ANCHOR - Global variables
 // Global output channel for logging

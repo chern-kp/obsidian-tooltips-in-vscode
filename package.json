@@ -3,6 +3,7 @@
     "displayName": "Obsidian Tooltips in VS Code",
     "description": "Allows to link Obsidian notes with keywords in code and display note link or content in tooltip",
     "version": "0.0.1",
+    "main": "src/extension.js",
     "engines": {
         "vscode": "^1.96.0"
     },
@@ -12,7 +13,6 @@
     "activationEvents": [
         "onLanguage:*"
     ],
-    "main": "src/extension.js",
     "contributes": {
         "commands": [
             {
