@@ -4,10 +4,9 @@ const path = require('path');
 const os = require('os');
 
 const { saveCache, loadCache } = require('./utils/cache');
+const { initializeLogging, log } = require('./utils/logging');
 
 //ANCHOR - Global variables
-// Global output channel for logging
-let outputChannel;
 // Timestamp of the last update of notes information
 let lastUpdateTime = 0;
 // List of directories to scan for notes that are selected by the user
@@ -438,19 +437,6 @@ module.exports = {
     deactivate,
 };
 
-
-//SECTION - Utility functions
-//FUNC - Initialize the output channel for logging
-function initializeLogging() {
-    outputChannel = vscode.window.createOutputChannel("Obsidian Tooltips");
-    outputChannel.show();
-}
-
-//FUNC - Log messages to the VS Code output channel
-function log(message) {
-    outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
-}
-
 async function getNoteContent(filePath) {
     try {
         const content = await fs.promises.readFile(filePath, "utf-8");
@@ -784,13 +770,13 @@ async function updateNotesInformation(vaultPath, force = false) {
 
         // Log results
         //STUB - List all notes and aliases in the output channel
-        outputChannel.appendLine(
+        log(
             `\nUpdated information for ${notes.length} notes:`
         );
         notesCache.forEach((noteInfo, relativePath) => {
-            outputChannel.appendLine(`→ ${relativePath}`);
+            log(`→ ${relativePath}`);
             if (noteInfo.aliases.length > 0) {
-                outputChannel.appendLine(
+                log(
                     `  Aliases: ${noteInfo.aliases.join(", ")}`
                 );
             }
