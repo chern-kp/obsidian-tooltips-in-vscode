@@ -20,11 +20,6 @@ let vscodeContext;
 // Temporary cache for notes information (Tiles and Aliases)
 let notesCache = new Map();
 
-// Setting: Enable underlining of matched keywords
-let matchedWordDecoration;
-// Timer for decoration updates (to prevent too frequent updates)
-let decorationTimer = null;
-
 const SEARCH_CONFIG = {
     // Regex pattern for matching words including allowed characters
     WORD_PATTERN: /(?:\b|^)([A-Za-z0-9]+(?:[.\-_:()]*[A-Za-z0-9]+)*)(?=\b|$)/g,
@@ -36,68 +31,16 @@ const SEARCH_CONFIG = {
 //FUNC - Activate the extension (Entry point)
 function activate(context) {
     vscodeContext = context; // Save context globally
-    // Initialize logging and cache systems
+    // Initialize logging system
     initializeLogging();
 
-    //SECTION - Setting: Enable underlining of matched keywords
-    // Initialize decoration type
-    matchedWordDecoration = vscode.window.createTextEditorDecorationType({
-        textDecoration: "none; border-bottom: 2px solid #9141AC",
-        light: {
-            borderColor: "#9141AC",
-        },
-        dark: {
-            borderColor: "#9141AC",
-        },
-    });
+    log("Extension activated!");
 
-    // Watch for configuration changes
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration((event) => {
-            if (
-                event.affectsConfiguration(
-                    "obsidian-tooltips.enableWordUnderline"
-                )
-            ) {
-                if (decorationTimer) clearTimeout(decorationTimer);
-                decorationTimer = setTimeout(() => {
-                    updateDecorations();
-                }, 250);
-            }
-        })
-    );
-
-    // Watch for active editor changes
-    context.subscriptions.push(
-        vscode.window.onDidChangeActiveTextEditor(() => {
-            if (decorationTimer) clearTimeout(decorationTimer);
-            decorationTimer = setTimeout(() => {
-                updateDecorations();
-            }, 250);
-        })
-    );
-
-    // Watch for document changes
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument((event) => {
-            const editor = vscode.window.activeTextEditor;
-            if (editor && event.document === editor.document) {
-                if (decorationTimer) clearTimeout(decorationTimer);
-                decorationTimer = setTimeout(() => {
-                    updateDecorations();
-                }, 250);
-            }
-        })
-    );
-
-    //!SECTION - Setting: Enable underlining of matched keywords
     // Restore selected directories from global state
     const savedDirectories = context.globalState.get("selectedDirectories");
     if (savedDirectories) {
         selectedDirectories = new Set(savedDirectories);
     }
-
-    log("Extension activated!");
 
     // Update notes information for connected vault on activation
     (async () => {
@@ -415,21 +358,6 @@ function activate(context) {
 
 //FUNC - Deactivate the extension. On deactivation, save the cache to file if possible
 function deactivate() {
-    try {
-        if (matchedWordDecoration) {
-            for (const editor of vscode.window.visibleTextEditors) {
-                editor.setDecorations(matchedWordDecoration, []);
-            }
-        }
-        if (decorationTimer) {
-            clearTimeout(decorationTimer);
-        }
-        saveCache(vscodeContext, notesCache, lastUpdateTime, log).catch((error) =>
-            log(`Error saving cache on deactivation: ${error.message}`)
-        );
-    } catch (error) {
-        log(`Error in deactivate: ${error.message}`);
-    }
     log("Extension deactivated");
 }
 
@@ -480,50 +408,6 @@ async function getNoteContent(filePath) {
 
 //!SECTION - Utility functions
 
-//SECTION - Functions for settings
-//FUNC - Update the underline decorations for matched words (Setting: Enable underlining of matched keywords)
-function updateDecorations() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) return;
-
-    // Check if feature is enabled
-    const isEnabled = vscode.workspace
-        .getConfiguration("obsidian-tooltips")
-        .get("enableWordUnderline");
-    if (!isEnabled) {
-        editor.setDecorations(matchedWordDecoration, []);
-        return;
-    }
-
-    // Scan the document for words and highlight them
-    const text = editor.document.getText();
-    const decorations = [];
-    const wordRegex = SEARCH_CONFIG.WORD_PATTERN;
-
-    let match;
-    while ((match = wordRegex.exec(text)) !== null) {
-        const word = match[0];
-
-        // Skip single-character words
-        if (word.length < 2) continue;
-
-        const noteMatch = findNoteMatch(word);
-        if (noteMatch) {
-            const startPos = editor.document.positionAt(match.index);
-            const endPos = editor.document.positionAt(
-                match.index + word.length
-            );
-            decorations.push({
-                range: new vscode.Range(startPos, endPos),
-            });
-        }
-    }
-
-    // Apply decorations to the editor
-    editor.setDecorations(matchedWordDecoration, decorations);
-}
-
-//!SECTION - Functions for settings
 
 //FUNC - Find the path to the Obsidian program
 
@@ -691,7 +575,6 @@ async function updateNotesInformation(vaultPath, force = false) {
         // Save cache to file
         try {
             await saveCache(vscodeContext, notesCache, lastUpdateTime, log);
-            updateDecorations();
             log("Cache saved successfully");
         } catch (error) {
             log(`Warning: Failed to save cache: ${error.message}`);

@@ -70,7 +70,7 @@ async function loadCache(vscodeContext, notesCache, lastUpdateTime, log) {
     }
 }
 
-module.exports = { // <-- Экспорт функций через module.exports
+module.exports = {
     getCachePath,
     saveCache,
     loadCache
