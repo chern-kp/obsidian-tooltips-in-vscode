@@ -3,6 +3,10 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
+// Import cache functions from separate file
+const { saveCache, loadCache } = require('./utils/cache');
+
+
 //ANCHOR - Global variables
 // Global output channel for logging
 let outputChannel;
@@ -15,7 +19,6 @@ let selectedDirectories = new Set(["Notes In Root"]);
 let vscodeContext;
 
 // Path to the cache file for saving notes information between sessions
-const CACHE_FILENAME = "notes-cache.json";
 // Temporary cache for notes information (Tiles and Aliases)
 let notesCache = new Map();
 
@@ -102,7 +105,7 @@ function activate(context) {
     (async () => {
         try {
             // Load cache and check if it was successful
-            const cacheLoaded = await loadCache();
+            const cacheLoaded = await loadCache(vscodeContext, notesCache, lastUpdateTime, log);
             if (!cacheLoaded) {
                 // Only clear cache if loading failed
                 notesCache.clear();
@@ -155,7 +158,7 @@ function activate(context) {
                     lastUpdateTime = 0;
                     // Clear cache file instead of deleting
                     try {
-                        await saveCache(); // This will save empty cache
+                        await saveCache(vscodeContext, notesCache, lastUpdateTime, log) // This will save empty cache
                         log("Cache cleared on disconnect");
                     } catch (error) {
                         log(`Error clearing cache file: ${error.message}`);
@@ -423,7 +426,7 @@ function deactivate() {
         if (decorationTimer) {
             clearTimeout(decorationTimer);
         }
-        saveCache().catch((error) =>
+        saveCache(vscodeContext, notesCache, lastUpdateTime, log).catch((error) =>
             log(`Error saving cache on deactivation: ${error.message}`)
         );
     } catch (error) {
@@ -437,63 +440,6 @@ module.exports = {
     deactivate,
 };
 
-//SECTION - Cache functions
-
-//FUNC - Get the path to the cache file
-async function getCachePath() {
-    const extensionPath = vscodeContext.globalStorageUri.fsPath;
-    await fs.promises.mkdir(extensionPath, { recursive: true });
-    return path.join(extensionPath, CACHE_FILENAME);
-}
-
-//FUNC - Load the cache file and add notes information to the cache
-async function saveCache() {
-    try {
-        const cachePath = await getCachePath();
-        const cacheData = {
-            notes: Array.from(notesCache.entries()),
-            timestamp: lastUpdateTime,
-        };
-        await fs.promises.writeFile(
-            cachePath,
-            JSON.stringify(cacheData, null, 2)
-        );
-        log(`Cache saved to ${cachePath}`);
-    } catch (error) {
-        log(`Error saving cache: ${error.message}`);
-        throw error;
-    }
-}
-
-//FUNC - Load the cache file as data for current session
-async function loadCache() {
-    try {
-        const cachePath = await getCachePath();
-        const exists = await fs.promises
-            .access(cachePath)
-            .then(() => true)
-            .catch(() => false);
-
-        if (!exists) {
-            log("No cache file found");
-            return false;
-        }
-
-        const cacheContent = await fs.promises.readFile(cachePath, "utf-8");
-        const cacheData = JSON.parse(cacheContent);
-
-        notesCache = new Map(cacheData.notes);
-        lastUpdateTime = cacheData.timestamp;
-
-        log(`Cache loaded from ${cachePath}`);
-        return true;
-    } catch (error) {
-        log(`Error loading cache: ${error.message}`);
-        return false;
-    }
-}
-
-//!SECTION - Cache functions
 
 //SECTION - Utility functions
 //FUNC - Initialize the output channel for logging
@@ -769,7 +715,7 @@ async function pickDirectories(vaultPath) {
             await updateNotesInformation(vaultPath, true);
 
             // Save cache after updating notes
-            await saveCache();
+            await saveCache(vscodeContext, notesCache, lastUpdateTime, log);
 
             quickPick.hide();
         });
@@ -830,7 +776,7 @@ async function updateNotesInformation(vaultPath, force = false) {
         lastUpdateTime = Date.now();
         // Save cache to file
         try {
-            await saveCache();
+            await saveCache(vscodeContext, notesCache, lastUpdateTime, log);
             updateDecorations();
             log("Cache saved successfully");
         } catch (error) {
