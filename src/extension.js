@@ -6,7 +6,10 @@ const { saveCache, loadCache } = require("./utils/cache");
 const { initializeLogging, log } = require("./utils/logging");
 const { findObsidian, getObsidianVaults } = require("./obsidian/finder");
 const { registerHoverProvider } = require("./hover/hoverProvider");
-const { registerConnectCommand } = require("./obsidian/connect");
+const {
+    registerConnectCommand,
+    pickDirectories,
+} = require("./obsidian/connect");
 const {
     getNoteContent,
     isVaultModified,
@@ -143,15 +146,24 @@ function activate(context) {
     let pickDirectoriesCommand = vscode.commands.registerCommand(
         "obsidian-tooltips.pickDirectories",
         async () => {
-            const connectedVault =
-                vscodeContext.globalState.get("connectedVault");
+            const connectedVault = vscodeContext.globalState.get("connectedVault");
             if (!connectedVault) {
                 vscode.window.showWarningMessage(
                     "Please connect to an Obsidian vault first"
                 );
                 return;
             }
-            await pickDirectories(connectedVault);
+
+            await pickDirectories(
+                connectedVault,
+                vscodeContext,
+                selectedDirectories,
+                notesCache,
+                lastUpdateTime,
+                saveCache,
+                log,
+                updateNotesInformation
+            );
         }
     );
 
@@ -200,110 +212,6 @@ module.exports = {
     activate,
     deactivate,
 };
-
-// FUNC - Let user pick directories to include
-async function pickDirectories(vaultPath) {
-    try {
-        // Load previously selected directories from global state
-        const savedDirectories =
-            vscodeContext.globalState.get("selectedDirectories") || [];
-        selectedDirectories = new Set(savedDirectories);
-
-        // Get root directories from vault
-        const rootDirs = await getRootDirectories(vaultPath);
-
-        // Prepare items for QuickPick
-        const items = [
-            {
-                label: "Notes In Root",
-                picked: selectedDirectories.has("Notes In Root"),
-                alwaysShow: true,
-            },
-            ...rootDirs.map((dir) => ({
-                label: dir,
-                picked: selectedDirectories.has(dir),
-                alwaysShow: true,
-            })),
-        ];
-
-        const quickPick = vscode.window.createQuickPick();
-        quickPick.items = items;
-        quickPick.canSelectMany = true;
-        quickPick.selectedItems = items.filter((item) => item.picked);
-        quickPick.title = "Select Directories to Include";
-        quickPick.placeholder =
-            "Choose directories (at least one must be selected)";
-
-        // Handle real-time selection changes
-        quickPick.onDidChangeSelection((selectedItems) => {
-            const selectedLabels = selectedItems.map((item) => item.label);
-
-            // Prevent empty selection
-            if (selectedItems.length === 0) {
-                vscode.window.showWarningMessage(
-                    "At least one directory must be selected"
-                );
-                return;
-            }
-
-            // Update selected directories
-            selectedDirectories = new Set(selectedLabels);
-        });
-
-        // Handle acceptance of selection
-        quickPick.onDidAccept(async () => {
-            const selectedLabels = quickPick.selectedItems.map(
-                (item) => item.label
-            );
-
-            // Prevent empty selection
-            if (selectedLabels.length === 0) {
-                vscode.window.showWarningMessage(
-                    "At least one directory must be selected"
-                );
-                return;
-            }
-
-            // Save selection to global state
-            await vscodeContext.globalState.update(
-                "selectedDirectories",
-                Array.from(selectedDirectories)
-            );
-
-            // Update notes based on selection
-            await updateNotesInformation(vaultPath, true);
-
-            // Save cache after updating notes
-            await saveCache(vscodeContext, notesCache, lastUpdateTime, log);
-
-            quickPick.hide();
-        });
-
-        quickPick.show();
-    } catch (error) {
-        log(`Error in pickDirectories: ${error.message}`);
-        vscode.window.showErrorMessage(
-            `Failed to load directories: ${error.message}`
-        );
-    }
-}
-
-//FUNC - Get root directories
-async function getRootDirectories(vaultPath) {
-    try {
-        const entries = await fs.promises.readdir(vaultPath, {
-            withFileTypes: true,
-        });
-        return entries
-            .filter(
-                (entry) => entry.isDirectory() && !entry.name.startsWith(".")
-            )
-            .map((entry) => entry.name);
-    } catch (error) {
-        log(`Error getting root directories: ${error.message}`);
-        throw error;
-    }
-}
 
 //FUNC - Update list of notes and aliases for the connected vault (or don't if up to date)
 async function updateNotesInformation(vaultPath, force = false) {
