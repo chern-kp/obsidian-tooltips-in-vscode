@@ -1,12 +1,17 @@
-const vscode = require('vscode');
-const fs = require('fs');
-const path = require('path');
+const vscode = require("vscode");
+const fs = require("fs");
+const path = require("path");
 
-const { saveCache, loadCache } = require('./utils/cache');
-const { initializeLogging, log } = require('./utils/logging');
-const { findObsidian, getObsidianVaults } = require('./obsidian/finder');
-const { registerHoverProvider } = require('./hover/hoverProvider');
-const { registerConnectCommand } = require('./obsidian/connect');
+const { saveCache, loadCache } = require("./utils/cache");
+const { initializeLogging, log } = require("./utils/logging");
+const { findObsidian, getObsidianVaults } = require("./obsidian/finder");
+const { registerHoverProvider } = require("./hover/hoverProvider");
+const { registerConnectCommand } = require("./obsidian/connect");
+const {
+    getNoteContent,
+    isVaultModified,
+    scanVaultDirectory,
+} = require("./obsidian/fetcher");
 
 // ! Use log(...) function for logging (logging.js)
 
@@ -28,7 +33,7 @@ const SEARCH_CONFIG = {
     WORD_PATTERN: /(?:\b|^)([A-Za-z0-9]+(?:[.\-_:()]*[A-Za-z0-9]+)*)(?=\b|$)/g,
     // Comparison options (true is case-insensitive, false is case-sensitive)
     CASE_INSENSITIVE: true,
-    ALLOWEDCHARS: "A-Za-z0-9-_.(){}[]:;!?+=<>*/\\"
+    ALLOWEDCHARS: "A-Za-z0-9-_.(){}[]:;!?+=<>*/\\",
 };
 
 //FUNC - Activate the extension (Entry point)
@@ -49,7 +54,12 @@ function activate(context) {
     (async () => {
         try {
             // Load cache and check if it was successful
-            const cacheLoaded = await loadCache(vscodeContext, notesCache, lastUpdateTime, log);
+            const cacheLoaded = await loadCache(
+                vscodeContext,
+                notesCache,
+                lastUpdateTime,
+                log
+            );
             if (!cacheLoaded) {
                 // Only clear cache if loading failed
                 notesCache.clear();
@@ -68,7 +78,10 @@ function activate(context) {
 
             log(`Connected vault found: ${connectedVault}`);
             // Check if vault has been modified since last update.
-            const needsRefresh = await isVaultModified(connectedVault);
+            const needsRefresh = await isVaultModified(
+                connectedVault,
+                lastUpdateTime
+            );
             //If so, update notes information
             if (needsRefresh) {
                 log("Vault has been modified. Updating notes information...");
@@ -82,7 +95,6 @@ function activate(context) {
             log(`Error during initialization: ${error.message}`);
         }
     })();
-
 
     // ANCHOR - Command registration for "Update Notes Information" command
     let updateCommand = vscode.commands.registerCommand(
@@ -143,7 +155,8 @@ function activate(context) {
         }
     );
 
-    const connectCommand = registerConnectCommand( // Call the function and get the command
+    const connectCommand = registerConnectCommand(
+        // Call the function and get the command
         context,
         notesCache,
         lastUpdateTime,
@@ -187,75 +200,6 @@ module.exports = {
     activate,
     deactivate,
 };
-
-async function getNoteContent(filePath) {
-    try {
-        const content = await fs.promises.readFile(filePath, "utf-8");
-        const lines = content.split("\n");
-        let inFrontmatter = false;
-        let contentBuffer = [];
-        let collectingContent = false;
-
-        for (const line of lines) {
-            const trimmedLine = line.trim();
-
-            // Detect frontmatter boundaries
-            if (trimmedLine === "---") {
-                inFrontmatter = !inFrontmatter;
-                collectingContent = !inFrontmatter; // Start collecting after frontmatter ends
-                continue;
-            }
-
-            // Skip lines inside frontmatter
-            if (inFrontmatter) continue;
-
-            // Stop at first H1 header (exact match for "# " at line start)
-            if (line.startsWith("# ")) {
-                break;
-            }
-
-            // Collect content between frontmatter and first header
-            if (collectingContent || !inFrontmatter) {
-                contentBuffer.push(line);
-            }
-        }
-
-        // Join lines and clean trailing whitespace/newlines
-        return contentBuffer.join("\n").replace(/[\n\r\s]+$/, "");
-    } catch (error) {
-        log(`Error reading note content for ${filePath}: ${error.message}`);
-        return "";
-    }
-}
-
-//FUNC - Check if vault directory has been modified since last update
-async function isVaultModified(vaultPath) {
-    try {
-        let latestModification = 0;
-
-        await scanVaultDirectory(vaultPath, async (fullPath) => {
-            const stats = await fs.promises.stat(fullPath);
-            latestModification = Math.max(latestModification, stats.mtimeMs);
-        });
-
-        // Check if we need to update
-        const needsRefresh = latestModification > lastUpdateTime;
-        log(
-            `Vault modification check: Last update: ${new Date(
-                lastUpdateTime
-            ).toLocaleString()}, Latest modification: ${new Date(
-                latestModification
-            ).toLocaleString()}`
-        );
-        log(`Update needed: ${needsRefresh}`);
-
-        return needsRefresh;
-    } catch (error) {
-        log(`Error checking vault modifications: ${error.message}`);
-        // If error occurs, force update to be safe
-        return true;
-    }
-}
 
 // FUNC - Let user pick directories to include
 async function pickDirectories(vaultPath) {
@@ -400,15 +344,11 @@ async function updateNotesInformation(vaultPath, force = false) {
 
         // Log results
         //STUB - List all notes and aliases in the output channel
-        log(
-            `\nUpdated information for ${notes.length} notes:`
-        );
+        log(`\nUpdated information for ${notes.length} notes:`);
         notesCache.forEach((noteInfo, relativePath) => {
             log(`→ ${relativePath}`);
             if (noteInfo.aliases.length > 0) {
-                log(
-                    `  Aliases: ${noteInfo.aliases.join(", ")}`
-                );
+                log(`  Aliases: ${noteInfo.aliases.join(", ")}`);
             }
         });
 
@@ -421,28 +361,6 @@ async function updateNotesInformation(vaultPath, force = false) {
         log(errorMessage);
         vscode.window.showErrorMessage(errorMessage);
         throw error;
-    }
-}
-
-//FUNC - Recursively scans vault directory for all markdown files
-async function scanVaultDirectory(dirPath, callback) {
-    const entries = await fs.promises.readdir(dirPath, {
-        withFileTypes: true,
-    });
-
-    for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name);
-
-        // Skip hidden files and directories
-        if (entry.name.startsWith(".")) {
-            continue;
-        }
-
-        if (entry.isDirectory()) {
-            await scanVaultDirectory(fullPath, callback);
-        } else if (entry.isFile() && path.extname(entry.name) === ".md") {
-            await callback(fullPath, entry);
-        }
     }
 }
 
@@ -538,7 +456,9 @@ function findNoteMatch(word) {
 
 //FUNC - Find an exact match for a word
 function findExactMatch(searchWord, caseInsensitive, applyNormalization) {
-    const normalizedSearch = caseInsensitive ? searchWord.toLowerCase() : searchWord;
+    const normalizedSearch = caseInsensitive
+        ? searchWord.toLowerCase()
+        : searchWord;
 
     for (const [relativePath, noteInfo] of notesCache.entries()) {
         const fileName = path.basename(relativePath, ".md");
@@ -585,7 +505,7 @@ function findExactMatch(searchWord, caseInsensitive, applyNormalization) {
 
 //FUNC - Normalize a string for comparison
 function normalizeForComparison(str, caseInsensitive) {
-    let normalized = str.replace(/[^\w.-]+$/, ''); // Remove trailing non-allowed characters
+    let normalized = str.replace(/[^\w.-]+$/, ""); // Remove trailing non-allowed characters
     if (caseInsensitive) {
         normalized = normalized.toLowerCase();
     }
