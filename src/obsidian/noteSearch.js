@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { log } = require('../utils/logging');
-const { scanVaultDirectory } = require('./fetcher');
-const { createObsidianUri } = require('../utils/uriHandler');
+const { scanVaultDirectory } = require('./noteFetcher');
+const { createObsidianUri } = require('../utils/noteUriHandler');
 
 //FUNC - Load note names and aliases from list of files into an array
 async function loadVaultNotes(vaultPath, selectedDirectories) {

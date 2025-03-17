@@ -2,7 +2,7 @@ const vscode = require("vscode");
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
-const { isVaultModified } = require("./fetcher");
+const { isVaultModified } = require("./noteFetcher");
 
 // FUNC - Registering the connect command
 function registerConnectCommand(

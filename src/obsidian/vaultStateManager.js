@@ -1,8 +1,8 @@
 const vscode = require('vscode');
 const path = require('path');
 const { log } = require('../utils/logging');
-const { isVaultModified } = require('./fetcher');
-const { loadVaultNotes } = require('./vaultSearch');
+const { isVaultModified } = require('./noteFetcher');
+const { loadVaultNotes } = require('./noteSearch');
 const { saveCache } = require('../utils/cache');
 
 //FUNC - Update list of notes and aliases for the connected vault (or don't if up to date)

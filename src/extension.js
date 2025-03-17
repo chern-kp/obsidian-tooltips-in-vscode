@@ -2,18 +2,21 @@ const vscode = require("vscode");
 
 const { saveCache, loadCache } = require("./utils/cache");
 const { initializeLogging, log } = require("./utils/logging");
-const { findObsidian, getObsidianVaults } = require("./obsidian/finder");
+const { findObsidian, getObsidianVaults } = require("./obsidian/obsidianFinder");
 const { registerHoverProvider } = require("./hover/hoverProvider");
 const {
     registerConnectCommand,
     pickDirectories,
-} = require("./obsidian/connect");
+} = require("./obsidian/vaultConnectionManager");
 const {
     getNoteContent,
     isVaultModified,
-} = require("./obsidian/fetcher");
-const { findNoteMatch } = require("./obsidian/vaultSearch");
-const { updateNotesInformation } = require("./obsidian/vaultManager");
+} = require("./obsidian/noteFetcher");
+const { findNoteMatch } = require("./obsidian/noteSearch");
+const { updateNotesInformation } = require("./obsidian/vaultStateManager");
+const { registerPickDirectoriesCommand } = require("./obsidian/commands/pickDirectoriesCommand");
+const { registerUpdateCommand } = require("./obsidian/commands/updateCommand");
+const { SEARCH_CONFIG } = require("./config/searchConfig");
 
 // ! Use log(...) function for logging (logging.js)
 
@@ -29,14 +32,6 @@ let vscodeContext;
 // Path to the cache file for saving notes information between sessions
 // Temporary cache for notes information (Tiles and Aliases)
 let notesCache = new Map();
-
-const SEARCH_CONFIG = {
-    // Regex pattern for matching words including allowed characters
-    WORD_PATTERN: /(?:\b|^)([A-Za-z0-9]+(?:[.\-_:()]*[A-Za-z0-9]+)*)(?=\b|$)/g,
-    // Comparison options (true is case-insensitive, false is case-sensitive)
-    CASE_INSENSITIVE: true,
-    ALLOWEDCHARS: "A-Za-z0-9-_.(){}[]:;!?+=<>*/\\",
-};
 
 //FUNC - Activate the extension (Entry point)
 function activate(context) {
@@ -86,29 +81,13 @@ function activate(context) {
     })();
 
     // ANCHOR - Command registration for "Update Notes Information" command
-    let updateCommand = vscode.commands.registerCommand(
-        "obsidian-tooltips.updateNotesInformation",
-        async () => {
-            const connectedVault = context.globalState.get("connectedVault");
-            if (!connectedVault) {
-                vscode.window.showWarningMessage(
-                    "Please connect to an Obsidian vault first"
-                );
-                return;
-            }
-
-            try {
-                // Update if vault was changed
-                const result = await updateNotesInformation(connectedVault, false, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
-                notesCache = result.notesCache;
-                lastUpdateTime = result.lastUpdateTime;
-            } catch (error) {
-                log(`Failed to update notes information: ${error.message}`);
-                vscode.window.showErrorMessage(
-                    `Failed to update notes: ${error.message}`
-                );
-            }
-        }
+    const updateCommand = registerUpdateCommand(
+        context,
+        notesCache,
+        lastUpdateTime,
+        saveCache,
+        log,
+        updateNotesInformation
     );
 
     // ANCHOR - Command registration for opening Obsidian URIs (Needed for ability to open URLs from hover popup)
@@ -131,28 +110,13 @@ function activate(context) {
     );
 
     // ANCHOR - Command registration for "Pick Directories" command
-    let pickDirectoriesCommand = vscode.commands.registerCommand(
-        "obsidian-tooltips.pickDirectories",
-        async () => {
-            const connectedVault = vscodeContext.globalState.get("connectedVault");
-            if (!connectedVault) {
-                vscode.window.showWarningMessage(
-                    "Please connect to an Obsidian vault first"
-                );
-                return;
-            }
-
-            await pickDirectories(
-                connectedVault,
-                vscodeContext,
-                selectedDirectories,
-                notesCache,
-                lastUpdateTime,
-                saveCache,
-                log,
-                updateNotesInformation
-            );
-        }
+    const pickDirectoriesCommand = registerPickDirectoriesCommand(
+        context,
+        notesCache,
+        lastUpdateTime,
+        saveCache,
+        log,
+        updateNotesInformation
     );
 
     const connectCommand = registerConnectCommand(
