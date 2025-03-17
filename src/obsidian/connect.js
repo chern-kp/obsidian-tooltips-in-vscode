@@ -2,6 +2,7 @@ const vscode = require("vscode");
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const { isVaultModified } = require("./fetcher");
 
 // FUNC - Registering the connect command
 function registerConnectCommand(
@@ -15,38 +16,20 @@ function registerConnectCommand(
     updateNotesInformation,
     pickDirectories
 ) {
-    let connectCommand = vscode.commands.registerCommand(
+    return vscode.commands.registerCommand(
         "obsidian-tooltips.connectWithObsidian",
         async () => {
             try {
-                // Check current connection status
-                const connectedVault =
-                    context.globalState.get("connectedVault");
+                const connectedVault = context.globalState.get("connectedVault");
 
+                // Check current connection status
                 if (connectedVault) {
-                    // Clear all cache data and reset timestamp on disconnect
-                    await context.globalState.update(
-                        "connectedVault",
-                        undefined
-                    );
+                    await context.globalState.update("connectedVault", undefined);
                     notesCache.clear();
                     lastUpdateTime = 0;
-                    // Clear cache file instead of deleting
-                    try {
-                        await saveCache(
-                            context,
-                            notesCache,
-                            lastUpdateTime,
-                            log
-                        );
-                        log("Cache cleared on disconnect");
-                    } catch (error) {
-                        log(`Error clearing cache file: ${error.message}`);
-                    }
-                    vscode.window.showInformationMessage(
-                        `Disconnected from vault: ${connectedVault}`
-                    );
-                    log(`Vault disconnected: ${connectedVault}`);
+                    // Clear cache file
+                    await saveCache(context, new Map(), 0, log);
+                    vscode.window.showInformationMessage(`Disconnected from vault: ${connectedVault}`);
                     return;
                 }
 
@@ -95,16 +78,22 @@ function registerConnectCommand(
 
                             try {
                                 // Initial vault scan on connection
-                                await updateNotesInformation(
+                                const result = await updateNotesInformation(
                                     vaultPath,
-                                    true
+                                    true,
+                                    context,
+                                    notesCache,
+                                    lastUpdateTime,
+                                    new Set(["Notes In Root"])
                                 );
+                                notesCache = result.notesCache;
+                                lastUpdateTime = result.lastUpdateTime;
 
-                                // Let user pick directories on connection - передаем все требуемые параметры
+                                // Let user pick directories on connection
                                 await pickDirectories(
                                     vaultPath,
                                     context,
-                                    null,
+                                    new Set(["Notes In Root"]),
                                     notesCache,
                                     lastUpdateTime,
                                     saveCache,
@@ -167,7 +156,6 @@ function registerConnectCommand(
             }
         }
     );
-    return connectCommand;
 }
 
 // FUNC - Let user pick directories to include
@@ -182,13 +170,41 @@ async function pickDirectories(
     updateNotesInformation
 ) {
     try {
+        // Check if vault is connected
+        if (!vaultPath) {
+            vscode.window.showWarningMessage("Please connect to an Obsidian vault first");
+            return;
+        }
+
+        // Ensure selectedDirectories is always a Set
+        if (!selectedDirectories || !(selectedDirectories instanceof Set)) {
+            selectedDirectories = new Set(["Notes In Root"]);
+            log("Initializing selectedDirectories with default value");
+        }
+
+        // Check if vault has been modified
+        const needsRefresh = await isVaultModified(vaultPath, lastUpdateTime);
+        if (needsRefresh) {
+            log("Vault has been modified. Updating notes information before directory selection...");
+            const result = await updateNotesInformation(
+                vaultPath,
+                true,
+                vscodeContext,
+                notesCache,
+                lastUpdateTime,
+                selectedDirectories
+            );
+            notesCache = result.notesCache;
+            lastUpdateTime = result.lastUpdateTime;
+        }
+
         // Load previously selected directories from global state
-        const savedDirectories =
-            vscodeContext.globalState.get("selectedDirectories") || [];
+        const savedDirectories = vscodeContext.globalState.get("selectedDirectories") || [];
         selectedDirectories = new Set(savedDirectories);
 
         // Get root directories from vault
         const rootDirs = await getRootDirectories(vaultPath, log);
+        log(`Found ${rootDirs.length} root directories in vault`);
 
         // Prepare items for QuickPick
         const items = [
@@ -196,11 +212,13 @@ async function pickDirectories(
                 label: "Notes In Root",
                 picked: selectedDirectories.has("Notes In Root"),
                 alwaysShow: true,
+                description: "Include notes directly in vault root"
             },
             ...rootDirs.map((dir) => ({
                 label: dir,
                 picked: selectedDirectories.has(dir),
                 alwaysShow: true,
+                description: `Include notes from ${dir} directory`
             })),
         ];
 
@@ -209,8 +227,7 @@ async function pickDirectories(
         quickPick.canSelectMany = true;
         quickPick.selectedItems = items.filter((item) => item.picked);
         quickPick.title = "Select Directories to Include";
-        quickPick.placeholder =
-            "Choose directories (at least one must be selected)";
+        quickPick.placeholder = "Choose directories (at least one must be selected)";
 
         // Handle real-time selection changes
         quickPick.onDidChangeSelection((selectedItems) => {
@@ -218,41 +235,54 @@ async function pickDirectories(
 
             // Prevent empty selection
             if (selectedItems.length === 0) {
-                vscode.window.showWarningMessage(
-                    "At least one directory must be selected"
-                );
+                vscode.window.showWarningMessage("At least one directory must be selected");
                 return;
             }
 
             // Update selected directories
             selectedDirectories = new Set(selectedLabels);
+            log(`Selection changed: ${selectedLabels.join(", ")}`);
         });
 
-        // Handle acceptance of selection
+        // Handle selection confirmation
         quickPick.onDidAccept(async () => {
-            const selectedLabels = quickPick.selectedItems.map(
-                (item) => item.label
-            );
+            const selectedLabels = quickPick.selectedItems.map((item) => item.label);
 
             // Prevent empty selection
             if (selectedLabels.length === 0) {
-                vscode.window.showWarningMessage(
-                    "At least one directory must be selected"
-                );
+                vscode.window.showWarningMessage("At least one directory must be selected");
                 return;
             }
 
-            // Save selection to global state
-            await vscodeContext.globalState.update(
-                "selectedDirectories",
-                Array.from(selectedDirectories)
-            );
+            try {
+                // Save selection to global state
+                await vscodeContext.globalState.update(
+                    "selectedDirectories",
+                    Array.from(selectedDirectories)
+                );
+                log(`Saved directory selection: ${selectedLabels.join(", ")}`);
 
-            // Update notes based on selection
-            await updateNotesInformation(vaultPath, true);
+                // Update notes information based on selection
+                const result = await updateNotesInformation(
+                    vaultPath,
+                    true,
+                    vscodeContext,
+                    notesCache,
+                    lastUpdateTime,
+                    selectedDirectories
+                );
+                notesCache = result.notesCache;
+                lastUpdateTime = result.lastUpdateTime;
 
-            // Save cache after updating notes
-            await saveCache(vscodeContext, notesCache, lastUpdateTime, log);
+                // Save cache after notes information update
+                await saveCache(vscodeContext, notesCache, lastUpdateTime, log);
+                log("Cache saved after directory selection update");
+
+                vscode.window.showInformationMessage("Directory selection updated successfully");
+            } catch (error) {
+                log(`Error during directory selection update: ${error.message}`);
+                vscode.window.showErrorMessage(`Failed to update directory selection: ${error.message}`);
+            }
 
             quickPick.hide();
         });
@@ -260,9 +290,7 @@ async function pickDirectories(
         quickPick.show();
     } catch (error) {
         log(`Error in pickDirectories: ${error.message}`);
-        vscode.window.showErrorMessage(
-            `Failed to load directories: ${error.message}`
-        );
+        vscode.window.showErrorMessage(`Failed to load directories: ${error.message}`);
     }
 
     return selectedDirectories;

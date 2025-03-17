@@ -55,6 +55,12 @@ function activate(context) {
     // Update notes information for connected vault on activation
     (async () => {
         try {
+            const connectedVault = context.globalState.get("connectedVault");
+            if (!connectedVault) {
+                log("No connected vault found. Skipping automatic update.");
+                return;
+            }
+
             // Load cache and check if it was successful
             const cacheLoaded = await loadCache(
                 vscodeContext,
@@ -62,36 +68,17 @@ function activate(context) {
                 lastUpdateTime,
                 log
             );
-            if (!cacheLoaded) {
-                // Only clear cache if loading failed
-                notesCache.clear();
-                lastUpdateTime = 0;
-                log("No cache found, starting fresh");
+
+            // Check if vault has been modified since last update
+            const needsRefresh = await isVaultModified(connectedVault, lastUpdateTime);
+
+            if (!cacheLoaded || needsRefresh) {
+                log("Cache needs refresh. Updating notes information...");
+                const result = await updateNotesInformation(connectedVault, true, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
+                notesCache = result.notesCache;
+                lastUpdateTime = result.lastUpdateTime;
             } else {
-                log("Cache loaded successfully");
-            }
-
-            // Check if a vault is connected. If so, update notes information
-            const connectedVault = context.globalState.get("connectedVault");
-            if (!connectedVault) {
-                log("No connected vault found. Skipping automatic update.");
-                return;
-            }
-
-            log(`Connected vault found: ${connectedVault}`);
-            // Check if vault has been modified since last update.
-            const needsRefresh = await isVaultModified(
-                connectedVault,
-                lastUpdateTime
-            );
-            //If so, update notes information
-            if (needsRefresh) {
-                log("Vault has been modified. Updating notes information...");
-                await updateNotesInformation(connectedVault, true, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
-            }
-            //If not, use cached data
-            else {
-                log("Vault is up to date. Using cached data.");
+                log("Using existing cache data");
             }
         } catch (error) {
             log(`Error during initialization: ${error.message}`);
@@ -112,7 +99,9 @@ function activate(context) {
 
             try {
                 // Update if vault was changed
-                await updateNotesInformation(connectedVault, false, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
+                const result = await updateNotesInformation(connectedVault, false, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
+                notesCache = result.notesCache;
+                lastUpdateTime = result.lastUpdateTime;
             } catch (error) {
                 log(`Failed to update notes information: ${error.message}`);
                 vscode.window.showErrorMessage(

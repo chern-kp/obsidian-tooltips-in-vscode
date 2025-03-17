@@ -82,21 +82,40 @@ async function loadVaultNotes(vaultPath, selectedDirectories) {
 
 //FUNC - Find a note or alias that matches the word user is hovering over
 function findNoteMatch(word, notesCache, searchConfig) {
+    log(`Searching for note match for word: "${word}"`);
+
+    // Check if notesCache and searchConfig are defined
+    if (!notesCache) {
+        log('Error: notesCache is undefined');
+        return null;
+    }
+    if (!searchConfig) {
+        log('Error: searchConfig is undefined');
+        return null;
+    }
+
+    log(`Current notesCache size: ${notesCache.size}`);
+    log(`Search config: ${JSON.stringify(searchConfig)}`);
+
     const caseInsensitive = searchConfig.CASE_INSENSITIVE;
+    log(`Case insensitive search: ${caseInsensitive}`);
 
     // Search for exact match with original word
     let exactMatch = findExactMatch(word, caseInsensitive, false, notesCache);
     if (exactMatch) {
+        log(`Found exact match: ${JSON.stringify(exactMatch)}`);
         return exactMatch;
     }
 
     // Match with normalized word
     const normalizedWord = normalizeForComparison(word, caseInsensitive);
+    log(`Trying normalized word: "${normalizedWord}"`);
     return findExactMatch(normalizedWord, caseInsensitive, true, notesCache);
 }
 
 //FUNC - Find an exact match for a word
 function findExactMatch(searchWord, caseInsensitive, applyNormalization, notesCache) {
+    log(`Looking for exact match of: "${searchWord}"`);
     const normalizedSearch = caseInsensitive
         ? searchWord.toLowerCase()
         : searchWord;
@@ -111,7 +130,10 @@ function findExactMatch(searchWord, caseInsensitive, applyNormalization, notesCa
             compareName = caseInsensitive ? fileName.toLowerCase() : fileName;
         }
 
+        log(`Comparing "${compareName}" with "${normalizedSearch}"`);
+
         if (compareName === normalizedSearch) {
+            log(`Found filename match: ${relativePath}`);
             return {
                 path: relativePath,
                 fullPath: noteInfo.fullPath,
@@ -129,7 +151,10 @@ function findExactMatch(searchWord, caseInsensitive, applyNormalization, notesCa
                 compareAlias = caseInsensitive ? alias.toLowerCase() : alias;
             }
 
+            log(`Comparing alias "${compareAlias}" with "${normalizedSearch}"`);
+
             if (compareAlias === normalizedSearch) {
+                log(`Found alias match: ${alias} -> ${relativePath}`);
                 return {
                     path: relativePath,
                     fullPath: noteInfo.fullPath,
@@ -141,6 +166,7 @@ function findExactMatch(searchWord, caseInsensitive, applyNormalization, notesCa
         }
     }
 
+    log("No exact match found");
     return null;
 }
 

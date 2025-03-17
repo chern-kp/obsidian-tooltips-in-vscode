@@ -1,23 +1,52 @@
-const vscode = require('vscode');
-const path = require('path');
-const { log } = require('../utils/logging');
+const vscode = require("vscode");
+const path = require("path");
+const { log } = require("../utils/logging");
 
-function registerHoverProvider(context, notesCache, SEARCH_CONFIG, getNoteContent, findNoteMatch) {
+function registerHoverProvider(
+    context,
+    notesCache,
+    SEARCH_CONFIG,
+    getNoteContent,
+    findNoteMatch
+) {
     return vscode.languages.registerHoverProvider(
         { scheme: "file", pattern: "**/*" },
         {
             async provideHover(document, position) {
                 const connectedVault =
                     context.globalState.get("connectedVault");
-                if (!connectedVault) return;
+                log(
+                    `Hover triggered at position: ${position.line}:${position.character}`
+                );
+                log(`Connected vault: ${connectedVault}`);
+                log(`Current notesCache size: ${notesCache.size}`);
+
+                if (!connectedVault) {
+                    log("No connected vault found, skipping hover");
+                    return;
+                }
 
                 const range = document.getWordRangeAtPosition(
-                    position,SEARCH_CONFIG.WORD_PATTERN
+                    position,
+                    SEARCH_CONFIG.WORD_PATTERN
                 );
-                if (!range) return;
+                if (!range) {
+                    log("No word found at hover position");
+                    return;
+                }
 
                 const word = document.getText(range);
-                const match = findNoteMatch(word);
+                log(`Found word at hover: "${word}"`);
+
+                log(`Checking search parameters:
+- word: ${word}
+- notesCache available: ${notesCache !== undefined}
+- notesCache size: ${notesCache?.size}
+- SEARCH_CONFIG available: ${SEARCH_CONFIG !== undefined}
+- SEARCH_CONFIG pattern: ${SEARCH_CONFIG?.WORD_PATTERN}`);
+
+                const match = findNoteMatch(word, notesCache, SEARCH_CONFIG);
+                log(`Match result: ${match ? JSON.stringify(match) : "null"}`);
 
                 if (match && match.uri) {
                     const message = new vscode.MarkdownString("", true);
@@ -26,6 +55,11 @@ function registerHoverProvider(context, notesCache, SEARCH_CONFIG, getNoteConten
 
                     // Get cached note info
                     const noteInfo = notesCache.get(match.path);
+                    log(
+                        `Note info from cache: ${
+                            noteInfo ? JSON.stringify(noteInfo) : "null"
+                        }`
+                    );
 
                     // Note title
                     const noteTitle = path.basename(match.path, ".md");
@@ -72,6 +106,8 @@ function registerHoverProvider(context, notesCache, SEARCH_CONFIG, getNoteConten
                     }
 
                     return new vscode.Hover(message);
+                } else {
+                    log("No matching note found for hover word");
                 }
             },
         }
