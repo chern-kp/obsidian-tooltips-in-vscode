@@ -1,6 +1,4 @@
 const vscode = require("vscode");
-const fs = require("fs");
-const path = require("path");
 
 const { saveCache, loadCache } = require("./utils/cache");
 const { initializeLogging, log } = require("./utils/logging");
@@ -13,8 +11,9 @@ const {
 const {
     getNoteContent,
     isVaultModified,
-    scanVaultDirectory,
 } = require("./obsidian/fetcher");
+const { findNoteMatch } = require("./obsidian/vaultSearch");
+const { updateNotesInformation } = require("./obsidian/vaultManager");
 
 // ! Use log(...) function for logging (logging.js)
 
@@ -88,7 +87,7 @@ function activate(context) {
             //If so, update notes information
             if (needsRefresh) {
                 log("Vault has been modified. Updating notes information...");
-                await updateNotesInformation(connectedVault, true);
+                await updateNotesInformation(connectedVault, true, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
             }
             //If not, use cached data
             else {
@@ -113,7 +112,7 @@ function activate(context) {
 
             try {
                 // Update if vault was changed
-                await updateNotesInformation(connectedVault, false);
+                await updateNotesInformation(connectedVault, false, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
             } catch (error) {
                 log(`Failed to update notes information: ${error.message}`);
                 vscode.window.showErrorMessage(
@@ -212,237 +211,3 @@ module.exports = {
     activate,
     deactivate,
 };
-
-//FUNC - Update list of notes and aliases for the connected vault (or don't if up to date)
-async function updateNotesInformation(vaultPath, force = false) {
-    try {
-        log("Checking if notes information update is needed");
-
-        // Skip update if vault hasn't been modified
-        if (!force && !(await isVaultModified(vaultPath))) {
-            const message = "Vault is up to date, skipping scan";
-            log(message);
-            vscode.window.showInformationMessage(message);
-            return;
-        }
-
-        log("Starting notes information update");
-        const notes = await loadVaultNotes(vaultPath);
-
-        // Update cache with new notes information
-        notesCache.clear();
-        notes.forEach((note) => {
-            const relativePath = path.relative(vaultPath, note.path);
-            notesCache.set(relativePath, {
-                fullPath: note.path,
-                aliases: note.aliases,
-                uri: note.uri,
-            });
-        });
-        // Update last update time
-        lastUpdateTime = Date.now();
-        // Save cache to file
-        try {
-            await saveCache(vscodeContext, notesCache, lastUpdateTime, log);
-            log("Cache saved successfully");
-        } catch (error) {
-            log(`Warning: Failed to save cache: ${error.message}`);
-            // Continue execution even if cache save fails
-        }
-
-        // Log results
-        //STUB - List all notes and aliases in the output channel
-        log(`\nUpdated information for ${notes.length} notes:`);
-        notesCache.forEach((noteInfo, relativePath) => {
-            log(`→ ${relativePath}`);
-            if (noteInfo.aliases.length > 0) {
-                log(`  Aliases: ${noteInfo.aliases.join(", ")}`);
-            }
-        });
-
-        vscode.window.showInformationMessage(
-            `Updated information for ${notes.length} notes`
-        );
-        log("Notes information update completed");
-    } catch (error) {
-        const errorMessage = `Failed to update notes information: ${error.message}`;
-        log(errorMessage);
-        vscode.window.showErrorMessage(errorMessage);
-        throw error;
-    }
-}
-
-//FUNC - Load note names and aliases from list of files into an array
-async function loadVaultNotes(vaultPath) {
-    try {
-        log(`Starting vault scan: ${vaultPath}`);
-        const notes = [];
-
-        // Function to extract aliases from file content
-        async function extractAliases(filePath) {
-            const content = await fs.promises.readFile(filePath, "utf-8");
-
-            // Check if file starts with frontmatter
-            if (!content.startsWith("---")) {
-                return [];
-            }
-
-            // Find the end of frontmatter
-            const secondDash = content.indexOf("---", 3);
-            if (secondDash === -1) {
-                return [];
-            }
-
-            // Extract frontmatter content
-            const frontmatter = content.substring(3, secondDash);
-
-            // Look for aliases section
-            const aliasesMatch = frontmatter.match(/aliases:\n((?:  - .*\n)*)/);
-            if (!aliasesMatch) {
-                return [];
-            }
-
-            // Extract individual aliases
-            const aliasesSection = aliasesMatch[1];
-            return aliasesSection
-                .split("\n")
-                .filter((line) => line.startsWith("  - "))
-                .map((line) => line.substring(4).trim());
-        }
-        await scanVaultDirectory(vaultPath, async (fullPath) => {
-            // Check if the note should be included based on selected directories
-            const relativePath = path.relative(vaultPath, fullPath);
-            const rootDir = relativePath.split(path.sep)[0];
-
-            // If "All" is selected or the file is in a selected directory
-            if (
-                selectedDirectories.has("All") ||
-                (rootDir === "" && selectedDirectories.has("Notes In Root")) ||
-                selectedDirectories.has(rootDir)
-            ) {
-                const aliases = await extractAliases(fullPath);
-                const obsidianUri = createObsidianUri(vaultPath, relativePath);
-
-                const noteInfo = {
-                    path: fullPath,
-                    relativePath: relativePath,
-                    aliases: aliases,
-                    uri: obsidianUri,
-                };
-                notes.push(noteInfo);
-
-                log(`Found note: ${fullPath}`);
-                if (aliases.length > 0) {
-                    log(`  Aliases: ${aliases.join(", ")}`);
-                }
-                log(`  URI: ${obsidianUri}`);
-            }
-        });
-
-        log(`Total notes found: ${notes.length}`);
-        return notes;
-    } catch (error) {
-        log(`Vault scan failed: ${error.message}`);
-        throw error;
-    }
-}
-
-//FUNC - Find a note or alias that matches the word user is hovering over
-function findNoteMatch(word) {
-    const caseInsensitive = SEARCH_CONFIG.CASE_INSENSITIVE;
-
-    // Search for exact match with original word
-    let exactMatch = findExactMatch(word, caseInsensitive, false);
-    if (exactMatch) {
-        return exactMatch;
-    }
-
-    // Match with normalized word
-    const normalizedWord = normalizeForComparison(word, caseInsensitive);
-    return findExactMatch(normalizedWord, caseInsensitive, true);
-}
-
-//FUNC - Find an exact match for a word
-function findExactMatch(searchWord, caseInsensitive, applyNormalization) {
-    const normalizedSearch = caseInsensitive
-        ? searchWord.toLowerCase()
-        : searchWord;
-
-    for (const [relativePath, noteInfo] of notesCache.entries()) {
-        const fileName = path.basename(relativePath, ".md");
-        let compareName;
-
-        if (applyNormalization) {
-            compareName = normalizeForComparison(fileName, caseInsensitive);
-        } else {
-            compareName = caseInsensitive ? fileName.toLowerCase() : fileName;
-        }
-
-        if (compareName === normalizedSearch) {
-            return {
-                path: relativePath,
-                fullPath: noteInfo.fullPath,
-                type: "filename",
-                uri: noteInfo.uri,
-            };
-        }
-
-        // Check aliases
-        for (const alias of noteInfo.aliases) {
-            let compareAlias;
-            if (applyNormalization) {
-                compareAlias = normalizeForComparison(alias, caseInsensitive);
-            } else {
-                compareAlias = caseInsensitive ? alias.toLowerCase() : alias;
-            }
-
-            if (compareAlias === normalizedSearch) {
-                return {
-                    path: relativePath,
-                    fullPath: noteInfo.fullPath,
-                    type: "alias",
-                    matchedAlias: alias,
-                    uri: noteInfo.uri,
-                };
-            }
-        }
-    }
-
-    return null;
-}
-
-//FUNC - Normalize a string for comparison
-function normalizeForComparison(str, caseInsensitive) {
-    let normalized = str.replace(/[^\w.-]+$/, ""); // Remove trailing non-allowed characters
-    if (caseInsensitive) {
-        normalized = normalized.toLowerCase();
-    }
-    return normalized;
-}
-
-//FUNC - Create an Obsidian URI for a note path
-function createObsidianUri(vaultPath, notePath) {
-    try {
-        // Get vault name from path
-        const vaultName = path.basename(vaultPath);
-
-        // Prepare the note path relative to vault root
-        const relativePath = notePath.replace(/\\/g, "/"); // Normalize path separators
-
-        // Remove .md extension if present
-        const notePathWithoutExt = relativePath.replace(/\.md$/, "");
-
-        // Encode both vault name and note path
-        const encodedVault = encodeURIComponent(vaultName);
-        const encodedFile = encodeURIComponent(notePathWithoutExt);
-
-        // Create the URI using the shorthand format
-        const uri = `obsidian://vault/${encodedVault}/${encodedFile}`;
-
-        log(`Generated Obsidian URI: ${uri}`);
-        return uri;
-    } catch (error) {
-        log(`Error creating Obsidian URI: ${error.message}`);
-        return null;
-    }
-}
