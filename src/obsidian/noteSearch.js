@@ -100,17 +100,38 @@ function findNoteMatch(word, notesCache, searchConfig) {
     const caseInsensitive = searchConfig.CASE_INSENSITIVE;
     log(`Case insensitive search: ${caseInsensitive}`);
 
-    // Search for exact match with original word
+    //Search for exact match WITHOUT normalization
+    log(`Searching for exact match of "${word}" without normalization.`);
     let exactMatch = findExactMatch(word, caseInsensitive, false, notesCache);
     if (exactMatch) {
-        log(`Found exact match: ${JSON.stringify(exactMatch)}`);
+        log(`Found exact match (without normalization): ${JSON.stringify(exactMatch)}`);
         return exactMatch;
+    } else {
+        log(`No exact match found without normalization.`);
     }
 
-    // Match with normalized word
+    //Search with normalization (if search without it failed)
     const normalizedWord = normalizeForComparison(word, caseInsensitive);
-    log(`Trying normalized word: "${normalizedWord}"`);
-    return findExactMatch(normalizedWord, caseInsensitive, true, notesCache);
+    log(`Searching for exact match using normalized word: "${normalizedWord}" (applyNormalization = true).`);
+
+    // Avoid redundant search if normalized word is the same as the original word AND case-insensitive is on
+    const originalWordLower = caseInsensitive ? word.toLowerCase() : word;
+    if (normalizedWord === originalWordLower && caseInsensitive) {
+        log(`Normalized word is the same as original word (case-insensitive), skipping redundant search.`);
+        return null;
+    }
+
+    // Perform the search using the normalized word and applying normalization to cache entries
+    let normalizedMatch = findExactMatch(normalizedWord, caseInsensitive, true, notesCache);
+    if (normalizedMatch) {
+        log(`Found normalized match: ${JSON.stringify(normalizedMatch)}`);
+        return normalizedMatch;
+    } else {
+        log(`No normalized match found.`);
+    }
+
+    log(`No match found for "${word}" after both steps.`);
+    return null;
 }
 
 //FUNC - Find an exact match for a word
