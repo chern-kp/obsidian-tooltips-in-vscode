@@ -42,9 +42,9 @@ async function pickDirectories(
             lastUpdateTime = result.lastUpdateTime;
         }
 
-        // Load previously selected directories from global state
-        const savedDirectories = vscodeContext.globalState.get("selectedDirectories") || [];
-        selectedDirectories = new Set(savedDirectories);
+        // Load previously selected directories from global state and convert to Set
+        const savedDirs = vscodeContext.globalState.get("selectedDirectories");
+        selectedDirectories = savedDirs ? new Set(savedDirs) : new Set(["Notes In Root"]);
 
         // Get root directories from vault
         const rootDirs = await getRootDirectories(vaultPath, log);
@@ -154,7 +154,8 @@ function registerPickDirectoriesCommand(
         async () => {
             try {
                 const vaultPath = context.globalState.get("connectedVault");
-                const selectedDirectories = context.globalState.get("selectedDirectories") || new Set(["Notes In Root"]);
+                const savedDirs = context.globalState.get("selectedDirectories");
+                const selectedDirectories = savedDirs ? new Set(savedDirs) : new Set(["Notes In Root"]);
 
                 await pickDirectories(
                     vaultPath,

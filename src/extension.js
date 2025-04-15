@@ -23,7 +23,7 @@ const { SEARCH_CONFIG } = require("./config/searchConfig");
 //ANCHOR - Global variables
 // Timestamp of the last update of notes information
 let lastUpdateTime = 0;
-// List of directories to scan for notes that are selected by the user
+// Properly convert saved directories to Set when loading from globalState
 let selectedDirectories = new Set(["Notes In Root"]);
 
 // Context (state) of the extension as global variable (for use in functions)
@@ -42,10 +42,10 @@ function activate(context) {
     log("Extension activated!");
 
     // Restore selected directories from global state
-    const savedDirectories = context.globalState.get("selectedDirectories");
-    if (savedDirectories) {
-        selectedDirectories = new Set(savedDirectories);
-    }
+    const savedDirs = context.globalState.get("selectedDirectories");
+
+    // Initializes selectedDirectories by either: using previously saved directories if they exist (savedDirs) or 2. creating a new Set with default directory "Notes In Root" if no saved dirs
+    selectedDirectories = savedDirs ? new Set(savedDirs) : new Set(["Notes In Root"]);
 
     // Update notes information for connected vault on activation
     (async () => {

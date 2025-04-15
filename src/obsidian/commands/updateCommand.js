@@ -11,7 +11,7 @@ function registerUpdateCommand(
     updateNotesInformation
 ) {
     return vscode.commands.registerCommand(
-        "obsidian-tooltips.updateNotes",
+        "obsidian-tooltips.updateNotesInformation",
         async () => {
             try {
                 const vaultPath = context.globalState.get("connectedVault");
@@ -22,7 +22,8 @@ function registerUpdateCommand(
                     return;
                 }
 
-                const selectedDirectories = context.globalState.get("selectedDirectories") || new Set(["Notes In Root"]);
+                const savedDirs = context.globalState.get("selectedDirectories");
+                const selectedDirectories = savedDirs ? new Set(savedDirs) : new Set(["Notes In Root"]);
 
                 // Check if vault has been modified
                 const needsRefresh = await isVaultModified(vaultPath, lastUpdateTime);
