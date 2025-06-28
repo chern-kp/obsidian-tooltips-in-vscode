@@ -7,8 +7,19 @@ const SEARCH_CONFIG = {
     /**
      * @property {RegExp} WORD_PATTERN
      * @description Regular expression pattern used for matching words in the editor.
+     * @deprecated
      */
     WORD_PATTERN: /(?:\b|^)([A-Za-z0-9]+(?:[-_:]*[A-Za-z0-9]+)*)(?=\b|$)/g,
+
+    /**
+     * @property {RegExp} SMART_WORD_PATTERN
+     * @description A more advanced regular expression pattern for matching words, including those with dots and dashes.
+     * @example
+     * SMART_WORD_PATTERN.test("example.word") // true
+     * SMART_WORD_PATTERN.test("example-word") // true
+     * SMART_WORD_PATTERN.test("example_word") // true
+     */
+    SMART_WORD_PATTERN: /[a-zA-Z0-9_]+(?:[\.-][a-zA-Z0-9_]+)*/g,
 
     /**
      * @property {string} ALLOWEDCHARS
