@@ -2,7 +2,19 @@ const vscode = require("vscode");
 const { isVaultModified } = require("../noteFetcher");
 const { getRootDirectories } = require("../vaultConnectionManager");
 
-// FUNC - Let user pick directories to include
+/**
+ * FUNC - Allows the user to pick which directories within the connected Obsidian vault should be scanned for notes.
+ * This function opens a QuickPick UI with a list of root directories in the vault and allows user to select multiple directories.
+ * @param {string} vaultPath The full path to the connected Obsidian vault.
+ * @param {vscode.ExtensionContext} vscodeContext The VS Code extension context.
+ * @param {Set<string>} selectedDirectories A Set containing the currently selected directories.
+ * @param {Map<string, object>} notesCache A Map to store cached notes information.
+ * @param {number} lastUpdateTime The timestamp of the last notes update.
+ * @param {function(vscode.ExtensionContext, Map<string, object>, number, function): Promise<void>} saveCache Function to save the notes cache.
+ * @param {function(string): void} log Logging function.
+ * @param {function(string, boolean, vscode.ExtensionContext, Map<string, object>, number, Set<string>): Promise<{notesCache: Map<string, object>, lastUpdateTime: number}>} updateNotesInformation Function to update notes information.
+ * @returns {Promise<Set<string>>} A Promise that resolves with the updated Set of selected directories.
+ */
 async function pickDirectories(
     vaultPath,
     vscodeContext,
@@ -17,7 +29,7 @@ async function pickDirectories(
         // Check if vault is connected
         if (!vaultPath) {
             vscode.window.showWarningMessage("Please connect to an Obsidian vault first");
-            return;
+            return new Set(); // Return an empty set if no vault is connected
         }
 
         // Ensure selectedDirectories is always a Set
@@ -135,12 +147,24 @@ async function pickDirectories(
     } catch (error) {
         log(`Error in pickDirectories: ${error.message}`);
         vscode.window.showErrorMessage(`Failed to load directories: ${error.message}`);
+        return new Set(); // Return an empty set on error
     }
 
     return selectedDirectories;
 }
 
-// FUNC - Registering the pick directories command
+/**
+ * FUNC - Registers the "Pick Directories" command.
+ * This command allows the user to select which directories within their connected Obsidian vault
+ * should be scanned for notes.
+ * @param {vscode.ExtensionContext} context The VS Code extension context.
+ * @param {Map<string, object>} notesCache A Map to store cached notes information.
+ * @param {number} lastUpdateTime The timestamp of the last notes update.
+ * @param {function(vscode.ExtensionContext, Map<string, object>, number, function): Promise<void>} saveCache Function to save the notes cache.
+ * @param {function(string): void} log Logging function.
+ * @param {function(string, boolean, vscode.ExtensionContext, Map<string, object>, number, Set<string>): Promise<{notesCache: Map<string, object>, lastUpdateTime: number}>} updateNotesInformation Function to update notes information.
+ * @returns {vscode.Disposable} The registered command disposable.
+ */
 function registerPickDirectoriesCommand(
     context,
     notesCache,

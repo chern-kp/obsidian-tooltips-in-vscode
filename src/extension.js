@@ -21,33 +21,58 @@ const { SEARCH_CONFIG } = require("./config/searchConfig");
 // ! Use log(...) function for logging (logging.js)
 
 //ANCHOR - Global variables
-// Timestamp of the last update of notes information
-let lastUpdateTime = 0;
-// Properly convert saved directories to Set when loading from globalState
-let selectedDirectories = new Set(["Notes In Root"]);
 
-// Context (state) of the extension as global variable (for use in functions)
+/**
+ * @global
+ * @type {vscode.ExtensionContext}
+ * @description The default VS Code extension context, saved globally for access from other functions.
+ */
 let vscodeContext;
 
-// Path to the cache file for saving notes information between sessions
-// Temporary cache for notes information (Tiles and Aliases)
+/**
+ * @global
+ * @type {number}
+ * @description Timestamp of the last update of notes information. Used to check if the vault has been modified since the last update.
+ */
+let lastUpdateTime = 0;
+
+/**
+ * @global
+ * @type {Set<string>}
+ * @description Set of directories selected by the user for scanning Obsidian notes.
+ * Defaults to "Notes In Root" if no directories are saved in global state.
+ */
+let selectedDirectories = new Set(["Notes In Root"]);
+
+/**
+ * @global
+ * @type {Map<string, object>}
+ * @description Temporary cache for Obsidian notes information (titles, aliases, URIs).
+ * Key is the relative path to the note file, value is an object containing { fullPath, aliases, uri }.
+ * This cache is saved to and loaded from `notes-cache.json` between sessions.
+ */
 let notesCache = new Map();
 
-//FUNC - Activate the extension (Entry point)
+/**
+ * FUNC - Activates the extension (Entry point).
+ * It activates on `onLanguage:*`, meaning it activates when almost any code or text file is opened.
+ *
+ * @param {vscode.ExtensionContext} context The context object provided by VS Code.
+ * @returns {void}
+ */
 function activate(context) {
-    vscodeContext = context; // Save context globally
-    // Initialize logging system
-    initializeLogging();
-
     log("Extension activated!");
 
-    // Restore selected directories from global state
-    const savedDirs = context.globalState.get("selectedDirectories");
+    vscodeContext = context; // Save context globally for other functions
 
-    // Initializes selectedDirectories by either: using previously saved directories if they exist (savedDirs) or 2. creating a new Set with default directory "Notes In Root" if no saved dirs
+    initializeLogging(); // Initialize the logging system, creating an "Obsidian Tooltips" output panel
+
+    // Restore selected directories from global state.
+    const savedDirs = context.globalState.get("selectedDirectories");
+    // If previously saved directories exist, use them; otherwise, default to "Notes In Root"
     selectedDirectories = savedDirs ? new Set(savedDirs) : new Set(["Notes In Root"]);
 
-    // Update notes information for connected vault on activation
+    // Asynchronously update notes information for the connected vault on activation to make sure the extension has up-to-date note data when it starts
     (async () => {
         try {
             const connectedVault = context.globalState.get("connectedVault");
@@ -56,7 +81,7 @@ function activate(context) {
                 return;
             }
 
-            // Load cache and check if it was successful
+            // Attempt to load the notes cache from `notes-cache.json` file
             const cacheLoaded = await loadCache(
                 vscodeContext,
                 notesCache,
@@ -64,9 +89,10 @@ function activate(context) {
                 log
             );
 
-            // Check if vault has been modified since last update
+            // Check if the Obsidian vault has been modified since the last cache update
             const needsRefresh = await isVaultModified(connectedVault, lastUpdateTime);
 
+            // If the cache failed to load or the vault has been modified, force an update of notes information
             if (!cacheLoaded || needsRefresh) {
                 log("Cache needs refresh. Updating notes information...");
                 const result = await updateNotesInformation(connectedVault, true, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
@@ -80,7 +106,7 @@ function activate(context) {
         }
     })();
 
-    // ANCHOR - Command registration for "Update Notes Information" command
+    // ANCHOR - Register the "Update Notes Information" command. This command allows users to manually refresh the list of Obsidian notes
     const updateCommand = registerUpdateCommand(
         context,
         notesCache,
@@ -90,7 +116,7 @@ function activate(context) {
         updateNotesInformation
     );
 
-    // ANCHOR - Command registration for opening Obsidian URIs (Needed for ability to open URLs from hover popup)
+    // ANCHOR - Register the command for opening Obsidian URIs. Needed for ability to open URLs from hover popup
     let openUriCommand = vscode.commands.registerCommand(
         "obsidian-tooltips.openObsidianUri",
         async (uri) => {
@@ -109,7 +135,7 @@ function activate(context) {
         }
     );
 
-    // ANCHOR - Command registration for "Pick Directories" command
+    // ANCHOR - Register the "Pick Directories" command. This command allows users to select specific directories within their Obsidian vault to be scanned for notes
     const pickDirectoriesCommand = registerPickDirectoriesCommand(
         context,
         notesCache,
@@ -119,8 +145,8 @@ function activate(context) {
         updateNotesInformation
     );
 
+    // ANCHOR - Register the "Connect With Obsidian" command. This command handles the connection/disconnection to an Obsidian vault, including auto-detection and manual selection
     const connectCommand = registerConnectCommand(
-        // Call the function and get the command
         context,
         notesCache,
         lastUpdateTime,
@@ -132,7 +158,7 @@ function activate(context) {
         pickDirectories
     );
 
-    // ANCHOR - Hover provider registration
+    // ANCHOR - Register the Hover Provider. It is responsible for detecting keywords in the editor and displaying Obsidian note tooltips
     const hoverProvider = registerHoverProvider(
         context,
         notesCache,
@@ -141,10 +167,10 @@ function activate(context) {
         findNoteMatch
     );
 
-    // Register provider first in subscriptions array for priority
+    // Register the hover provider with higher priority by placing it at the beginning of the subscriptions array
     context.subscriptions.splice(0, 0, hoverProvider);
 
-    // Register all commands and providers
+    // Add all registered commands and providers to the extension's subscriptions
     context.subscriptions.push(
         connectCommand,
         updateCommand,
@@ -155,7 +181,10 @@ function activate(context) {
     log("Extension fully initialized");
 }
 
-//FUNC - Deactivate the extension. On deactivation, save the cache to file if possible
+/**
+ * FUNC - Deactivates the extension. This function is called by VS Code when the extension is deactivated
+ * @returns {void}
+ */
 function deactivate() {
     log("Extension deactivated");
 }

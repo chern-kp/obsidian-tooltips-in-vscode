@@ -1,7 +1,19 @@
 const vscode = require("vscode");
 const { isVaultModified } = require("../noteFetcher");
 
-// FUNC - Registering the update command
+/**
+ * FUNC - Registers the "Update Notes Information" command.
+ * This command allows the user to manually trigger an update of the Obsidian notes cache.
+ * It checks if a vault is connected and if the vault has been modified since the last update.
+ *
+ * @param {vscode.ExtensionContext} context The VS Code extension context.
+ * @param {Map<string, object>} notesCache A Map to store cached notes information.
+ * @param {number} lastUpdateTime The timestamp of the last notes update.
+ * @param {function(vscode.ExtensionContext, Map<string, object>, number, function): Promise<void>} saveCache Function to save the notes cache.
+ * @param {function(string): void} log Logging function.
+ * @param {function(string, boolean, vscode.ExtensionContext, Map<string, object>, number, Set<string>): Promise<{notesCache: Map<string, object>, lastUpdateTime: number}>} updateNotesInformation Function to update notes information.
+ * @returns {vscode.Disposable} The registered command disposable.
+ */
 function registerUpdateCommand(
     context,
     notesCache,
@@ -25,7 +37,7 @@ function registerUpdateCommand(
                 const savedDirs = context.globalState.get("selectedDirectories");
                 const selectedDirectories = savedDirs ? new Set(savedDirs) : new Set(["Notes In Root"]);
 
-                // Check if vault has been modified
+                // Check if vault has been modified since the last update
                 const needsRefresh = await isVaultModified(vaultPath, lastUpdateTime);
                 if (!needsRefresh) {
                     vscode.window.showInformationMessage(
@@ -34,7 +46,7 @@ function registerUpdateCommand(
                     return;
                 }
 
-                // Update notes information
+                // Update notes information by scanning the vault
                 const result = await updateNotesInformation(
                     vaultPath,
                     true,
@@ -46,7 +58,7 @@ function registerUpdateCommand(
                 notesCache = result.notesCache;
                 lastUpdateTime = result.lastUpdateTime;
 
-                // Save cache
+                // Save the updated cache locally
                 await saveCache(context, notesCache, lastUpdateTime, log);
 
                 vscode.window.showInformationMessage(

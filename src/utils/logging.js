@@ -1,15 +1,30 @@
 const vscode = require('vscode');
 
-// Global output channel for logging
+/**
+ * @global
+ * @type {vscode.OutputChannel}
+ * @description Global output channel for logging extension messages in VS Code into "Output" panel
+ */
 let outputChannel;
 
-//FUNC - Initialize the output channel for logging
+/**
+ * FUNC - Initializes the output channel for logging.
+ * This function creates a new output channel named "Obsidian Tooltips" and makes it visible.
+ * It should be called once during extension activation.
+ *
+ * @returns {void}
+ */
 function initializeLogging() {
     outputChannel = vscode.window.createOutputChannel("Obsidian Tooltips");
-    outputChannel.show();
+    outputChannel.show(); // Show the output channel upon creation
 }
 
-//FUNC - Log messages to the VS Code output channel
+/**
+ * FUNC - Logs messages to the VS Code output channel.
+ *
+ * @param {string} message The message string to be logged.
+ * @returns {void}
+ */
 function log(message) {
     outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
 }

@@ -4,13 +4,29 @@ const { log } = require('../utils/logging');
 const { scanVaultDirectory } = require('./noteFetcher');
 const { createObsidianUri } = require('../utils/noteUriHandler');
 
-//FUNC - Load note names and aliases from list of files into an array
+/**
+ * FUNC - Loads note names and aliases from a list of files into an array.
+ * This function scans the selected by user vault directories for Markdown files,
+ * extracts their aliases from YAML frontmatter, and creates Obsidian URIs for them.
+ *
+ * @param {string} vaultPath The full path to the Obsidian vault.
+ * @param {Set<string>} selectedDirectories A Set of directories to scan within the vault.
+ * @returns {Promise<Array<object>>} A Promise that resolves with an array of note information objects.
+ * Each object contains: `path` (full file path), `relativePath`, `aliases` (array of strings), and `uri` (Obsidian URI).
+ * @throws {Error} If the vault scan fails.
+ */
 async function loadVaultNotes(vaultPath, selectedDirectories) {
     try {
         log(`Starting vault scan: ${vaultPath}`);
         const notes = [];
 
-        // Function to extract aliases from file content
+        /**
+         * FUNC - Extracts aliases from the YAML frontmatter of a Markdown file.
+         * Aliases are expected to be in a `aliases:` section within the frontmatter.
+         *
+         * @param {string} filePath The full path to the Markdown file.
+         * @returns {Promise<string[]>} A Promise that resolves with an array of aliases (strings).
+         */
         async function extractAliases(filePath) {
             const content = await fs.promises.readFile(filePath, "utf-8");
 
@@ -80,7 +96,15 @@ async function loadVaultNotes(vaultPath, selectedDirectories) {
     }
 }
 
-//FUNC - Find a note or alias that matches the word user is hovering over
+/**
+ * FUNC - Finds a note or alias that matches the word the user is hovering over.
+ * It first attempts an exact match without normalization, then with normalization if the first fails.
+ *
+ * @param {string} word The word from the editor to search for.
+ * @param {Map<string, object>} notesCache A Map containing cached Obsidian notes information.
+ * @param {object} searchConfig Configuration for search, including `CASE_INSENSITIVE`.
+ * @returns {object|null} An object containing note match details (`path`, `fullPath`, `type`, `uri`, `matchedAlias?`) or `null` if no match is found.
+ */
 function findNoteMatch(word, notesCache, searchConfig) {
     log(`Searching for note match for word: "${word}"`);
 
@@ -134,7 +158,16 @@ function findNoteMatch(word, notesCache, searchConfig) {
     return null;
 }
 
-//FUNC - Find an exact match for a word
+/**
+ * FUNC - Finds an exact match for a given search word within the notes cache.
+ * It compares the search word with note filenames and aliases, with options for case insensitivity and normalization.
+ *
+ * @param {string} searchWord The word to search for.
+ * @param {boolean} caseInsensitive If true, performs a case-insensitive comparison.
+ * @param {boolean} applyNormalization If true, normalizes the strings before comparison (removes trailing non-alphanumeric characters).
+ * @param {Map<string, object>} notesCache A Map containing cached Obsidian notes information.
+ * @returns {object|null} An object containing note match details (`path`, `fullPath`, `type`, `uri`, `matchedAlias?`) or `null` if no match is found.
+ */
 function findExactMatch(searchWord, caseInsensitive, applyNormalization, notesCache) {
     log(`Looking for exact match of: "${searchWord}"`);
     const normalizedSearch = caseInsensitive
@@ -191,7 +224,14 @@ function findExactMatch(searchWord, caseInsensitive, applyNormalization, notesCa
     return null;
 }
 
-//FUNC - Normalize a string for comparison
+/**
+ * FUNC - Normalizes a string for comparison by removing trailing non-word characters
+ * and optionally converting it to lowercase.
+ *
+ * @param {string} str The input string to normalize.
+ * @param {boolean} caseInsensitive If true, converts the string to lowercase.
+ * @returns {string} The normalized string.
+ */
 function normalizeForComparison(str, caseInsensitive) {
     let normalized = str.replace(/[^\w.-]+$/, ""); // Remove trailing non-allowed characters
     if (caseInsensitive) {
