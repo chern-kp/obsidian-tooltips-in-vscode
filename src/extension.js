@@ -12,22 +12,13 @@ const {
     getNoteContent,
     isVaultModified,
 } = require("./obsidian/noteFetcher");
-const { findNoteMatch } = require("./obsidian/noteSearch");
-const { updateNotesInformation } = require("./obsidian/vaultStateManager");
+const { updateNotesInformation, buildLookupCache } = require("./obsidian/vaultStateManager");
 const { registerPickDirectoriesCommand } = require("./obsidian/commands/pickDirectoriesCommand");
 const { registerUpdateCommand } = require("./obsidian/commands/updateCommand");
-const { SEARCH_CONFIG } = require("./config/searchConfig");
 
 // ! Use log(...) function for logging (logging.js)
 
 //ANCHOR - Global variables
-
-/**
- * @global
- * @type {vscode.ExtensionContext}
- * @description The default VS Code extension context, saved globally for access from other functions.
- */
-let vscodeContext;
 
 /**
  * @global
@@ -53,6 +44,46 @@ let selectedDirectories = new Set(["Notes In Root"]);
  */
 let notesCache = new Map();
 
+let lookupCache = new Map();
+let multiWordKeys = [];
+let hoverProviderDisposable;
+
+function reRegisterHoverProvider(context) {
+    // Step 1. Delete the old hover provider to avoid duplicates
+    if (hoverProviderDisposable) {
+        hoverProviderDisposable.dispose();
+    }
+
+    // Step 2. Register new hover provider with the updated data from variables
+    hoverProviderDisposable = registerHoverProvider(
+        context,
+        lookupCache,
+        multiWordKeys,
+        notesCache,
+        getNoteContent
+    );
+
+    // Step 3. Add the new hover provider to the context subscriptions
+    context.subscriptions.push(hoverProviderDisposable);
+    log("Hover provider re-registered with updated data");
+}
+
+async function updateAndReRegister(vaultPath, force, context, notesCache, lastUpdateTime, selectedDirectories) {
+    const result = await updateNotesInformation(vaultPath, force, context, notesCache, lastUpdateTime, selectedDirectories);
+
+    // Update all global variables
+    notesCache = result.notesCache;
+    lookupCache = result.lookupCache;
+    multiWordKeys = result.multiWordKeys;
+    lastUpdateTime = result.lastUpdateTime;
+
+    // Re-register HoverProvider with new data
+    reRegisterHoverProvider(context);
+
+    // Return the result, which the calling code expects (if it needs it)
+    return { notesCache: notesCache, lastUpdateTime: lastUpdateTime };
+}
+
 /**
  * FUNC - Activates the extension (Entry point).
  * It activates on `onLanguage:*`, meaning it activates when almost any code or text file is opened.
@@ -61,11 +92,9 @@ let notesCache = new Map();
  * @returns {void}
  */
 function activate(context) {
+    initializeLogging(); // Initialize the logging system, creating an "Obsidian Tooltips" output panel.
     log("Extension activated!");
 
-    vscodeContext = context; // Save context globally for other functions
-
-    initializeLogging(); // Initialize the logging system, creating an "Obsidian Tooltips" output panel
 
     // Restore selected directories from global state.
     const savedDirs = context.globalState.get("selectedDirectories");
@@ -81,40 +110,52 @@ function activate(context) {
                 return;
             }
 
-            // Attempt to load the notes cache from `notes-cache.json` file
-            const cacheLoaded = await loadCache(
-                vscodeContext,
-                notesCache,
-                lastUpdateTime,
-                log
-            );
+            const loadedData = await loadCache(context, notesCache, lastUpdateTime, log);
 
-            // Check if the Obsidian vault has been modified since the last cache update
+            if (loadedData.cacheLoaded) {
+                notesCache = loadedData.notesCache;
+                lastUpdateTime = loadedData.lastUpdateTime;
+                log(`Loaded ${notesCache.size} notes from file cache.`);
+
+                // Build the lookup cache from the loaded notes cache
+                const builtCaches = buildLookupCache(notesCache);
+                lookupCache = builtCaches.lookupCache;
+                multiWordKeys = builtCaches.multiWordKeys;
+                log(`Initial lookup cache built. Found ${multiWordKeys.length} multi-word keys.`);
+            }
+
             const needsRefresh = await isVaultModified(connectedVault, lastUpdateTime);
 
-            // If the cache failed to load or the vault has been modified, force an update of notes information
-            if (!cacheLoaded || needsRefresh) {
+            if (!loadedData.cacheLoaded || needsRefresh) {
                 log("Cache needs refresh. Updating notes information...");
-                const result = await updateNotesInformation(connectedVault, true, vscodeContext, notesCache, lastUpdateTime, selectedDirectories);
+                const result = await updateNotesInformation(connectedVault, true, context, notesCache, lastUpdateTime, selectedDirectories);
                 notesCache = result.notesCache;
+                lookupCache = result.lookupCache;
+                multiWordKeys = result.multiWordKeys;
                 lastUpdateTime = result.lastUpdateTime;
             } else {
-                log("Using existing cache data");
+                log("Using existing cache data.");
             }
         } catch (error) {
             log(`Error during initialization: ${error.message}`);
+        } finally {
+            // In any case, re-register the Hover Provider
+            reRegisterHoverProvider(context);
         }
     })();
 
     // ANCHOR - Register the "Update Notes Information" command. This command allows users to manually refresh the list of Obsidian notes
+    const updateHandler = (...args) => updateAndReRegister(...args);
+
     const updateCommand = registerUpdateCommand(
         context,
         notesCache,
         lastUpdateTime,
         saveCache,
         log,
-        updateNotesInformation
+        updateHandler
     );
+
 
     // ANCHOR - Register the command for opening Obsidian URIs. Needed for ability to open URLs from hover popup
     let openUriCommand = vscode.commands.registerCommand(
@@ -142,7 +183,7 @@ function activate(context) {
         lastUpdateTime,
         saveCache,
         log,
-        updateNotesInformation
+        updateHandler
     );
 
     // ANCHOR - Register the "Connect With Obsidian" command. This command handles the connection/disconnection to an Obsidian vault, including auto-detection and manual selection
@@ -154,27 +195,14 @@ function activate(context) {
         log,
         findObsidian,
         getObsidianVaults,
-        updateNotesInformation,
+        updateHandler,
         pickDirectories
     );
-
-    // ANCHOR - Register the Hover Provider. It is responsible for detecting keywords in the editor and displaying Obsidian note tooltips
-    const hoverProvider = registerHoverProvider(
-        context,
-        notesCache,
-        SEARCH_CONFIG,
-        getNoteContent,
-        findNoteMatch
-    );
-
-    // Register the hover provider with higher priority by placing it at the beginning of the subscriptions array
-    context.subscriptions.splice(0, 0, hoverProvider);
 
     // Add all registered commands and providers to the extension's subscriptions
     context.subscriptions.push(
         connectCommand,
         updateCommand,
-        hoverProvider,
         openUriCommand,
         pickDirectoriesCommand
     );

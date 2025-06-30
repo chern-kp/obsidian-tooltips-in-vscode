@@ -11,7 +11,9 @@ const TRAILING_CHARS_REGEX = /[\(\)\[\];:]+$/g;
  * normalize("  Hello World!  "); // "hello world"
  * @returns {string} The normalized string.
  */
-export function normalize(key) {
+function normalize(key) {
     if (!key) return '';
     return key.toLowerCase().replace(TRAILING_CHARS_REGEX, '').trim();
 }
+
+module.exports = { normalize };
