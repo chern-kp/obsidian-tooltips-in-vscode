@@ -1,33 +1,36 @@
 /**
  * @constant
  * @type {object}
- * @description Configuration for the note search functionality
+ * @description Provides language-specific configurations for token search.
  */
 const SEARCH_CONFIG = {
     /**
-     * @property {RegExp} WORD_PATTERN
-     * @description Regular expression pattern used for matching words in the editor.
-     * @deprecated
+     * @property {object} LANGUAGE_PATTERNS
+     * @description A collection of regular expression patterns tailored for specific languages
+     * to accurately determine the boundaries of a "word" or "token" under the cursor.
+     * This is the core component for the token extraction logic.
      */
-    WORD_PATTERN: /(?:\b|^)([A-Za-z0-9]+(?:[-_:]*[A-Za-z0-9]+)*)(?=\b|$)/g,
+    LANGUAGE_PATTERNS: {
+        // "A word is any sequence of letters, numbers, underscores, dots, colons, parentheses, and hyphens". It's greedy and works well with VS Code's `getWordRangeAtPosition`.
+        javascript: /[\w.:\(\)-]+/,
+        typescript: /[\w.:\(\)-]+/,
+
+        // For CSS, we don't need parentheses.
+        css: /[\w:.-]+/,
+        scss: /[\w:.-]+/,
+
+        // For HTML, we mostly care about letters, numbers, and hyphens (for class names).
+        html: /[\w-]+/,
+
+        // A safe default for any other languages.
+        default: /[\w.-]+/
+    },
 
     /**
-     * @property {RegExp} SMART_WORD_PATTERN
-     * @description A more advanced regular expression pattern for matching words, including those with dots and dashes.
-     * @example
-     * SMART_WORD_PATTERN.test("example.word") // true
-     * SMART_WORD_PATTERN.test("example-word") // true
-     * SMART_WORD_PATTERN.test("example_word") // true
+     * @property {boolean}
+     * @description Defines the default case sensitivity for searches.
+     * The actual search logic might override this based on context.
      */
-    SMART_WORD_PATTERN: /[a-zA-Z0-9_]+(?:[\.-][a-zA-Z0-9_]+)*/g,
-
-    /**
-     * @property {string} ALLOWEDCHARS
-     * @description A string containing characters that are EXPLICITLY ALLOWED within a "word". This is used in conjunction with `WORD_PATTERN`.
-     */
-    ALLOWEDCHARS: "A-Za-z0-9-_.(){}[]:;!?+=<>*/\\",
-
-    // Comparison options (true is case-insensitive, false is case-sensitive)
     CASE_INSENSITIVE: true,
 };
 

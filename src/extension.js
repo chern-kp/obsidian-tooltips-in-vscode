@@ -2,21 +2,28 @@ const vscode = require("vscode");
 
 const { saveCache, loadCache } = require("./utils/cache");
 const { initializeLogging, log } = require("./utils/logging");
-const { findObsidian, getObsidianVaults } = require("./obsidian/obsidianFinder");
+const {
+    findObsidian,
+    getObsidianVaults,
+} = require("./obsidian/obsidianFinder");
 const { registerHoverProvider } = require("./hover/hoverProvider");
 const {
     registerConnectCommand,
     pickDirectories,
 } = require("./obsidian/vaultConnectionManager");
+const { getNoteContent, isVaultModified } = require("./obsidian/noteFetcher");
 const {
-    getNoteContent,
-    isVaultModified,
-} = require("./obsidian/noteFetcher");
-const { updateNotesInformation, buildLookupCache } = require("./obsidian/vaultStateManager");
-const { registerPickDirectoriesCommand } = require("./obsidian/commands/pickDirectoriesCommand");
+    updateNotesInformation,
+    buildLookupCache,
+} = require("./obsidian/vaultStateManager");
+const {
+    registerPickDirectoriesCommand,
+} = require("./obsidian/commands/pickDirectoriesCommand");
 const { registerUpdateCommand } = require("./obsidian/commands/updateCommand");
 
-// ! Use log(...) function for logging (logging.js)
+/** ! Use log(...) function for logging.
+ * Implementation: {@link log} function in `logging.js`.
+ */
 
 //ANCHOR - Global variables
 
@@ -24,6 +31,9 @@ const { registerUpdateCommand } = require("./obsidian/commands/updateCommand");
  * @global
  * @type {number}
  * @description Timestamp of the last update of notes information. Used to check if the vault has been modified since the last update.
+ * Used in:
+ * {@link updateNotesInformation} in `vaultStateManager.js` to determine if the vault needs to be updated.
+ * {@link isVaultModified} in `noteFetcher.js` to check if the vault has been modified since the last update.
  */
 let lastUpdateTime = 0;
 
@@ -45,9 +55,54 @@ let selectedDirectories = new Set(["Notes In Root"]);
 let notesCache = new Map();
 
 let lookupCache = new Map();
-let multiWordKeys = [];
 let hoverProviderDisposable;
 
+/**
+ * FUNC - Activates the extension (Entry point).
+ * It activates on `onLanguage:*`, meaning it activates when almost any code or text file is opened.
+ * ! For more information see /docs/ARCHITECTURE.md file.
+ *
+ * @param {vscode.ExtensionContext} context The context object provided by VS Code.
+ * @returns {void}
+ */
+function activate(context) {
+    // STEP 1: Initialize logging and restore user settings from the previous session.
+    initializeLogging();
+    log("Extension activated!");
+
+    // STEP 2. When the extension is activated, check the global state for previously selected directories.
+    restoreSelectedDirectories(context);
+
+    // STEP 3. Initialize the extension on activation.
+    initializeOnActivation(context);
+
+    // STEP 4. Register all the commands (that user can call from VS Code) that the extension provides.
+    registerCommands(context);
+
+    log("Extension fully initialized");
+}
+
+/**
+ * FUNC - Restores the selected directories from the global state.
+ * @param {vscode.ExtensionContext} context The extension context.
+ */
+function restoreSelectedDirectories(context) {
+    // Restore selected directories from global state.
+    // Global state is a storage provided by VS Code to save data across sessions.
+    const savedDirs = context.globalState.get("selectedDirectories");
+
+    // If previously saved directories exist, use them; otherwise, default to "Notes In Root"
+    selectedDirectories = savedDirs
+        ? new Set(savedDirs)
+        : new Set(["Notes In Root"]);
+}
+
+/**
+ * FUNC - Re-registers the Hover Provider with the current state of the caches.
+ * This function disposes of the old provider and creates a new one, ensuring
+ * that hover tooltips always use the most up-to-date data.
+ * @param {vscode.ExtensionContext} context The extension context.
+ */
 function reRegisterHoverProvider(context) {
     // Step 1. Delete the old hover provider to avoid duplicates
     if (hoverProviderDisposable) {
@@ -58,7 +113,6 @@ function reRegisterHoverProvider(context) {
     hoverProviderDisposable = registerHoverProvider(
         context,
         lookupCache,
-        multiWordKeys,
         notesCache,
         getNoteContent
     );
@@ -68,85 +122,111 @@ function reRegisterHoverProvider(context) {
     log("Hover provider re-registered with updated data");
 }
 
-async function updateAndReRegister(vaultPath, force, context, notesCache, lastUpdateTime, selectedDirectories) {
-    const result = await updateNotesInformation(vaultPath, force, context, notesCache, lastUpdateTime, selectedDirectories);
+/**
+ * FUNC - Updates the notes information and re-registers the Hover Provider.
+ */
+
+async function updateAndReRegister(
+    vaultPath,
+    force,
+    context,
+    notesCache,
+    lastUpdateTime,
+    selectedDirectories
+) {
+    const result = await updateNotesInformation(
+        vaultPath,
+        force,
+        context,
+        notesCache,
+        lastUpdateTime,
+        selectedDirectories
+    );
 
     // Update all global variables
-    notesCache = result.notesCache;
-    lookupCache = result.lookupCache;
-    multiWordKeys = result.multiWordKeys;
-    lastUpdateTime = result.lastUpdateTime;
+    this.notesCache = result.notesCache;
+    this.lookupCache = result.lookupCache;
+    this.lastUpdateTime = result.lastUpdateTime;
 
     // Re-register HoverProvider with new data
     reRegisterHoverProvider(context);
 
     // Return the result, which the calling code expects (if it needs it)
-    return { notesCache: notesCache, lastUpdateTime: lastUpdateTime };
+    return { notesCache: this.notesCache, lastUpdateTime: this.lastUpdateTime };
 }
 
 /**
- * FUNC - Activates the extension (Entry point).
- * It activates on `onLanguage:*`, meaning it activates when almost any code or text file is opened.
- *
- * @param {vscode.ExtensionContext} context The context object provided by VS Code.
- * @returns {void}
+ * FUNC - Initializes the extension on activation.
+ * @param {vscode.ExtensionContext} context The extension context.
  */
-function activate(context) {
-    initializeLogging(); // Initialize the logging system, creating an "Obsidian Tooltips" output panel.
-    log("Extension activated!");
+async function initializeOnActivation(context) {
+    try {
+        // Check the global state (storage) for a connected vault.
+        const connectedVault = context.globalState.get("connectedVault");
+        if (!connectedVault) {
+            log("No connected vault found. Skipping automatic update.");
+            // Call registration with empty parameter to activate the provider
+            reRegisterHoverProvider(context);
+            return;
+        }
 
+        const loadedData = await loadCache(
+            context,
+            notesCache,
+            lastUpdateTime,
+            log
+        );
+        if (loadedData.cacheLoaded) {
+            notesCache = loadedData.notesCache;
+            lastUpdateTime = loadedData.lastUpdateTime;
+            log(`Loaded ${notesCache.size} notes from file cache.`);
 
-    // Restore selected directories from global state.
-    const savedDirs = context.globalState.get("selectedDirectories");
-    // If previously saved directories exist, use them; otherwise, default to "Notes In Root"
-    selectedDirectories = savedDirs ? new Set(savedDirs) : new Set(["Notes In Root"]);
+            // Build the lookup cache from the loaded notes cache
+            const builtCaches = buildLookupCache(notesCache);
+            lookupCache = builtCaches.lookupCache;
+        }
 
-    // Asynchronously update notes information for the connected vault on activation to make sure the extension has up-to-date note data when it starts
-    (async () => {
-        try {
-            const connectedVault = context.globalState.get("connectedVault");
-            if (!connectedVault) {
-                log("No connected vault found. Skipping automatic update.");
-                return;
-            }
+        const needsRefresh = await isVaultModified(
+            connectedVault,
+            lastUpdateTime
+        );
 
-            const loadedData = await loadCache(context, notesCache, lastUpdateTime, log);
-
-            if (loadedData.cacheLoaded) {
-                notesCache = loadedData.notesCache;
-                lastUpdateTime = loadedData.lastUpdateTime;
-                log(`Loaded ${notesCache.size} notes from file cache.`);
-
-                // Build the lookup cache from the loaded notes cache
-                const builtCaches = buildLookupCache(notesCache);
-                lookupCache = builtCaches.lookupCache;
-                multiWordKeys = builtCaches.multiWordKeys;
-                log(`Initial lookup cache built. Found ${multiWordKeys.length} multi-word keys.`);
-            }
-
-            const needsRefresh = await isVaultModified(connectedVault, lastUpdateTime);
-
-            if (!loadedData.cacheLoaded || needsRefresh) {
-                log("Cache needs refresh. Updating notes information...");
-                const result = await updateNotesInformation(connectedVault, true, context, notesCache, lastUpdateTime, selectedDirectories);
-                notesCache = result.notesCache;
-                lookupCache = result.lookupCache;
-                multiWordKeys = result.multiWordKeys;
-                lastUpdateTime = result.lastUpdateTime;
-            } else {
-                log("Using existing cache data.");
-            }
-        } catch (error) {
-            log(`Error during initialization: ${error.message}`);
-        } finally {
-            // In any case, re-register the Hover Provider
+        if (!loadedData.cacheLoaded || needsRefresh) {
+            log("Cache needs refresh. Updating notes information...");
+            await updateAndReRegister(
+                connectedVault,
+                true,
+                context,
+                notesCache,
+                lastUpdateTime,
+                selectedDirectories
+            );
+        } else {
+            log("Using existing cache data.");
+            // We still need to register the provider with the loaded data
             reRegisterHoverProvider(context);
         }
-    })();
+    } catch (error) {
+        log(`Error during initialization: ${error.message}`);
+    }
+}
 
-    // ANCHOR - Register the "Update Notes Information" command. This command allows users to manually refresh the list of Obsidian notes
-    const updateHandler = (...args) => updateAndReRegister(...args);
+/**
+ * FUNC - Deactivates the extension. This function is called by VS Code when the extension is deactivated
+ * @returns {void}
+ */
+function deactivate() {
+    log("Extension deactivated");
+}
 
+// SECTION - Register Commands -------------------------------
+
+function registerCommands(context) {
+    const updateHandler = (...args) => {
+        return updateAndReRegister(...args);
+    };
+
+    // ANCHOR - Register the "Update Notes Information" command.
     const updateCommand = registerUpdateCommand(
         context,
         notesCache,
@@ -156,13 +236,11 @@ function activate(context) {
         updateHandler
     );
 
-
-    // ANCHOR - Register the command for opening Obsidian URIs. Needed for ability to open URLs from hover popup
+    // ANCHOR - Register the command for opening Obsidian URIs.
     let openUriCommand = vscode.commands.registerCommand(
         "obsidian-tooltips.openObsidianUri",
         async (uri) => {
             try {
-                // Convert uri string to Uri object if needed
                 const uriToOpen =
                     typeof uri === "string" ? vscode.Uri.parse(uri) : uri;
                 await vscode.env.openExternal(uriToOpen);
@@ -176,7 +254,7 @@ function activate(context) {
         }
     );
 
-    // ANCHOR - Register the "Pick Directories" command. This command allows users to select specific directories within their Obsidian vault to be scanned for notes
+    // ANCHOR - Register the "Pick Directories" command.
     const pickDirectoriesCommand = registerPickDirectoriesCommand(
         context,
         notesCache,
@@ -186,7 +264,7 @@ function activate(context) {
         updateHandler
     );
 
-    // ANCHOR - Register the "Connect With Obsidian" command. This command handles the connection/disconnection to an Obsidian vault, including auto-detection and manual selection
+    // ANCHOR - Register the "Connect With Obsidian" command.
     const connectCommand = registerConnectCommand(
         context,
         notesCache,
@@ -206,16 +284,9 @@ function activate(context) {
         openUriCommand,
         pickDirectoriesCommand
     );
-    log("Extension fully initialized");
 }
 
-/**
- * FUNC - Deactivates the extension. This function is called by VS Code when the extension is deactivated
- * @returns {void}
- */
-function deactivate() {
-    log("Extension deactivated");
-}
+//! SECTION - Register Commands -------------------------------
 
 module.exports = {
     activate,

@@ -1,19 +1,14 @@
 /**
- * Regex to match and remove trailing special characters from a string.
- * @type {RegExp}
+ * Creates a canonical key for indexing in the lookupCache's top level.
+ * @param {string} key The original string from a filename or alias.
+ * @returns {string} The canonical key.
  */
-const TRAILING_CHARS_REGEX = /[\(\)\[\];:]+$/g;
-
-/**
- * Normalizes a string by trimming whitespace, converting to lowercase, and removing trailing special characters.
- * @param {*} key Initial string to normalize.
- * @example
- * normalize("  Hello World!  "); // "hello world"
- * @returns {string} The normalized string.
- */
-function normalize(key) {
-    if (!key) return '';
-    return key.toLowerCase().replace(TRAILING_CHARS_REGEX, '').trim();
+function canonicalNormalize(key) {
+    if (typeof key !== 'string' || !key) return '';
+    return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-module.exports = { normalize };
+
+module.exports = {
+    canonicalNormalize
+};

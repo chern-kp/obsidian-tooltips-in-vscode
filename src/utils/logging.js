@@ -1,3 +1,9 @@
+/**
+ * @module logging
+ * @description Provides logging functionality.
+ */
+
+
 const vscode = require('vscode');
 
 /**
