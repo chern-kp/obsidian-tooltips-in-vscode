@@ -130,29 +130,29 @@ async function updateAndReRegister(
     vaultPath,
     force,
     context,
-    notesCache,
-    lastUpdateTime,
+    currentNotesCache,
+    currentLastUpdateTime,
     selectedDirectories
 ) {
     const result = await updateNotesInformation(
         vaultPath,
         force,
         context,
-        notesCache,
-        lastUpdateTime,
+        currentNotesCache,
+        currentLastUpdateTime,
         selectedDirectories
     );
 
     // Update all global variables
-    this.notesCache = result.notesCache;
-    this.lookupCache = result.lookupCache;
-    this.lastUpdateTime = result.lastUpdateTime;
+    notesCache = result.notesCache;
+    lookupCache = result.lookupCache;
+    lastUpdateTime = result.lastUpdateTime;
 
     // Re-register HoverProvider with new data
     reRegisterHoverProvider(context);
 
     // Return the result, which the calling code expects (if it needs it)
-    return { notesCache: this.notesCache, lastUpdateTime: this.lastUpdateTime };
+    return { notesCache: notesCache, lastUpdateTime: lastUpdateTime };
 }
 
 /**
