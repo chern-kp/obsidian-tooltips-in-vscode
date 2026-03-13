@@ -17,6 +17,7 @@
             "name": "Run Extension (clean)",
             "type": "extensionHost",
             "request": "launch",
+            "runtimeExecutable": "${execPath}",
             "args": [
                 "--extensionDevelopmentPath=${workspaceFolder}",
                 "--disable-extensions"

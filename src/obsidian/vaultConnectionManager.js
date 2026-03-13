@@ -52,91 +52,9 @@ function registerConnectCommand(
                 log("Connect With Obsidian command triggered");
 
                 // Attempt to find the Obsidian executable automatically
-                const obsidianPath = await findObsidian();
+                let obsidianPath = await findObsidian();
 
-                if (obsidianPath) {
-                    await context.globalState.update(
-                        "obsidianPath",
-                        obsidianPath
-                    );
-                    log(`Obsidian path saved: ${obsidianPath}`);
-
-                    // Get list of available Obsidian vaults
-                    const vaults = await getObsidianVaults();
-                    if (vaults.length === 0) {
-                        vscode.window.showInformationMessage(
-                            "No Obsidian vaults found!"
-                        );
-                        return;
-                    }
-
-                    // Prompt user to select a vault from the found list
-                    const selectedVault = await vscode.window.showQuickPick(
-                        vaults.map((path) => ({
-                            label: path.split(/[\\/]/).pop(), // Display vault name
-                            description: path, // Full path as description
-                            detail: path, // Full path as detail
-                        })),
-                        {
-                            placeHolder: "Select a vault to connect",
-                            ignoreFocusOut: true, // Keep quick pick open if focus is lost
-                        }
-                    );
-
-                    if (selectedVault) {
-                        // Ensure that 'description' property exists.
-                        // @ts-ignore
-                        if (typeof selectedVault === 'object' && selectedVault !== null && 'description' in selectedVault) {
-                            // @ts-ignore
-                            const vaultPath = selectedVault.description;
-
-                            await context.globalState.update(
-                                "connectedVault",
-                                vaultPath
-                            );
-
-                            try {
-                                // Perform an initial scan of the selected vault to update notes information
-                                const result = await updateNotesInformation(
-                                    vaultPath,
-                                    true, // Force update
-                                    context,
-                                    notesCache,
-                                    lastUpdateTime,
-                                    new Set(["Notes In Root"]) // Default to scanning notes in root
-                                );
-                                notesCache = result.notesCache;
-                                lastUpdateTime = result.lastUpdateTime;
-
-                                // Prompt user to pick specific directories within the vault to scan.
-                                await pickDirectories(
-                                    vaultPath,
-                                    context,
-                                    new Set(["Notes In Root"]), // Initial selected directories
-                                    notesCache,
-                                    lastUpdateTime,
-                                    saveCache,
-                                    log,
-                                    updateNotesInformation
-                                );
-                            } catch (error) {
-                                vscode.window.showErrorMessage(
-                                    `Failed to scan vault: ${error.message}`
-                                );
-                            }
-
-                            vscode.window.showInformationMessage(
-                                `Connected to vault: ${vaultPath}`
-                            );
-
-                            log(`Vault connected: ${vaultPath}`);
-                        } else {
-                            log("Error: selectedVault is not a QuickPickItem or missing description property.");
-                            vscode.window.showErrorMessage("Error connecting to vault. Please try again.");
-                        }
-                    }
-                } else {
-                    // If Obsidian executable is not found automatically, prompt user to locate it manually
+                if (!obsidianPath) {
                     log("Opening file picker dialog");
                     const result = await vscode.window.showOpenDialog({
                         canSelectFiles: true,
@@ -156,18 +74,95 @@ function registerConnectCommand(
                     });
 
                     if (result?.[0]?.fsPath) {
-                        await context.globalState.update(
-                            "obsidianPath",
-                            result[0].fsPath
-                        );
-                        log(`Obsidian path manually set: ${result[0].fsPath}`);
-                        vscode.window.showInformationMessage(
-                            "Select a vault to connect"
-                        );
+                        obsidianPath = result[0].fsPath;
+                        log(`Obsidian path manually set: ${obsidianPath}`);
                     } else {
                         log("File picker cancelled by user");
+                        return;
                     }
                 }
+
+                await context.globalState.update(
+                    "obsidianPath",
+                    obsidianPath
+                );
+                log(`Obsidian path saved: ${obsidianPath}`);
+
+                // Get list of available Obsidian vaults
+                const vaults = await getObsidianVaults();
+                if (vaults.length === 0) {
+                    vscode.window.showInformationMessage(
+                        "No Obsidian vaults found!"
+                    );
+                    return;
+                }
+
+                // Prompt user to select a vault from the found list
+                const selectedVault = await vscode.window.showQuickPick(
+                    vaults.map((vaultPath) => ({
+                        label: vaultPath.split(/[\\/]/).pop(), // Display vault name
+                        description: vaultPath, // Full path as description
+                        detail: vaultPath, // Full path as detail
+                    })),
+                    {
+                        placeHolder: "Select a vault to connect",
+                        ignoreFocusOut: true, // Keep quick pick open if focus is lost
+                    }
+                );
+
+                if (selectedVault) {
+                    // Ensure that 'description' property exists.
+                    // @ts-ignore
+                    if (typeof selectedVault === 'object' && selectedVault !== null && 'description' in selectedVault) {
+                        // @ts-ignore
+                        const vaultPath = selectedVault.description;
+
+                        await context.globalState.update(
+                            "connectedVault",
+                            vaultPath
+                        );
+
+                        try {
+                            // Perform an initial scan of the selected vault to update notes information
+                            const result = await updateNotesInformation(
+                                vaultPath,
+                                true, // Force update
+                                context,
+                                notesCache,
+                                lastUpdateTime,
+                                new Set(["Notes In Root"]) // Default to scanning notes in root
+                            );
+                            notesCache = result.notesCache;
+                            lastUpdateTime = result.lastUpdateTime;
+
+                            // Prompt user to pick specific directories within the vault to scan.
+                            await pickDirectories(
+                                vaultPath,
+                                context,
+                                new Set(["Notes In Root"]), // Initial selected directories
+                                notesCache,
+                                lastUpdateTime,
+                                saveCache,
+                                log,
+                                updateNotesInformation
+                            );
+                        } catch (error) {
+                            vscode.window.showErrorMessage(
+                                `Failed to scan vault: ${error.message}`
+                            );
+                        }
+
+                        vscode.window.showInformationMessage(
+                            `Connected to vault: ${vaultPath}`
+                        );
+
+                        log(`Vault connected: ${vaultPath}`);
+                    } else {
+                        log("Error: selectedVault is not a QuickPickItem or missing description property.");
+                        vscode.window.showErrorMessage("Error connecting to vault. Please try again.");
+                    }
+                }
+
             } catch (error) {
                 const errorMessage = `Connection error: ${error.message}`;
                 log(errorMessage);
